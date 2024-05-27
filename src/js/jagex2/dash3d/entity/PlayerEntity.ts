@@ -9,18 +9,21 @@ import Packet from '../../io/Packet';
 import JString from '../../datastruct/JString';
 import {TypedArray1d} from '../../util/Arrays';
 import Colors from '../../graphics/Colors';
+import NpcType from '../../config/NpcType';
+import {Game} from '../../../game';
 
 export default class PlayerEntity extends PathingEntity {
-    static readonly APPEARANCE: number = 0x1;
-    static readonly ANIM: number = 0x2;
-    static readonly FACE_ENTITY: number = 0x4;
-    static readonly SAY: number = 0x8;
-    static readonly DAMAGE: number = 0x10;
-    static readonly FACE_COORD: number = 0x20;
-    static readonly CHAT: number = 0x40;
-    static readonly BIG_UPDATE: number = 0x80;
+    static readonly FACE_ENTITY: number = 0x1;
+    static readonly FACE_COORD: number = 0x2;
+    static readonly SAY: number = 0x4;
+    static readonly ANIM: number = 0x8;
+    static readonly APPEARANCE: number = 0x10;
+    static readonly DAMAGE0: number = 0x20;
+    static readonly BIG_UPDATE: number = 0x40;
+    static readonly CHAT: number = 0x80;
     static readonly SPOTANIM: number = 0x100;
-    static readonly EXACT_MOVE: number = 0x200;
+    static readonly DAMAGE1: number = 0x200;
+    static readonly EXACT_MOVE: number = 0x400;
 
     // prettier-ignore
     static readonly TORSO_RECOLORS: number[] = [
@@ -118,6 +121,7 @@ export default class PlayerEntity extends PathingEntity {
 
     name: string | null = null;
     visible: boolean = false;
+    team: number = 0;
     gender: number = 0;
     headicons: number = 0;
     appearances: Uint16Array = new Uint16Array(12);
@@ -136,14 +140,20 @@ export default class PlayerEntity extends PathingEntity {
     maxTileX: number = 0;
     maxTileZ: number = 0;
     lowMemory: boolean = false;
+    transmogrify: NpcType | null = null;
+    skillLevel: number = 0;
 
-    draw(loopCycle: number): Model | null {
+    getModel(): Model | null {
         if (!this.visible) {
             return null;
         }
 
-        let model: Model = this.getSequencedModel();
-        this.height = model.maxY;
+        let model: Model | null = this.getSequencedModel();
+        if (!model) {
+            return null;
+        }
+
+        this.height = model.minY;
         model.pickable = true;
 
         if (this.lowMemory) {
@@ -152,7 +162,7 @@ export default class PlayerEntity extends PathingEntity {
 
         if (this.spotanimId !== -1 && this.spotanimFrame !== -1) {
             const spotanim: SpotAnimType = SpotAnimType.instances[this.spotanimId];
-            const model2: Model = Model.modelShareColored(spotanim.getModel(), true, !spotanim.disposeAlpha, false);
+            const model2: Model = Model.modelShareColored(spotanim.getModel(), true, this.spotanimFrame === -1, false);
 
             model2.translate(-this.spotanimOffset, 0, 0);
             model2.createLabelReferences();
@@ -171,11 +181,11 @@ export default class PlayerEntity extends PathingEntity {
         }
 
         if (this.locModel) {
-            if (loopCycle >= this.locStopCycle) {
+            if (Game.loopCycle >= this.locStopCycle) {
                 this.locModel = null;
             }
 
-            if (loopCycle >= this.locStartCycle && loopCycle < this.locStopCycle) {
+            if (Game.loopCycle >= this.locStartCycle && Game.loopCycle < this.locStopCycle) {
                 const loc: Model | null = this.locModel;
                 if (loc) {
                     loc.translate(this.locOffsetY - this.y, this.locOffsetX - this.x, this.locOffsetZ - this.z);
@@ -220,13 +230,29 @@ export default class PlayerEntity extends PathingEntity {
 
         this.gender = buf.g1;
         this.headicons = buf.g1;
+        this.transmogrify = null;
+        this.team = 0; // TODO: team and transmogrify
 
         for (let part: number = 0; part < 12; part++) {
             const msb: number = buf.g1;
             if (msb === 0) {
                 this.appearances[part] = 0;
-            } else {
-                this.appearances[part] = (msb << 8) + buf.g1;
+                continue;
+            }
+
+            this.appearances[part] = (msb << 8) + buf.g1;
+
+            if (part === 0 && this.appearances[0] === 65535) {
+                this.transmogrify = NpcType.get(buf.g2);
+                break;
+            }
+
+            if (this.appearances[part] >= 512 && this.appearances[part] - 512 < ObjType.count) {
+                const team: number = ObjType.get(this.appearances[part] - 512).team;
+
+                if (team != 0) {
+                    this.team = team;
+                }
             }
         }
 
@@ -275,6 +301,7 @@ export default class PlayerEntity extends PathingEntity {
 
         this.name = JString.formatName(JString.fromBase37(buf.g8));
         this.combatLevel = buf.g1;
+        this.skillLevel = buf.g2;
         this.visible = true;
 
         this.appearanceHashcode = 0n;
@@ -300,6 +327,32 @@ export default class PlayerEntity extends PathingEntity {
 
     getHeadModel(): Model | null {
         if (!this.visible) {
+            return null;
+        }
+
+        if (this.transmogrify) {
+            return this.transmogrify.getHeadModel();
+        }
+
+        let invalid: boolean = false;
+
+        for (let part: number = 0; part < 12; part++) {
+            const value: number = this.appearances[part];
+
+            // TODO:
+            if ((value >= 256 && value < 512) || value >= 512) {
+                invalid = true;
+            }
+            // if (value >= 256 && value < 512 && !IdkType.instances[value - 256].validateHeadModel()) {
+            //     invalid = true;
+            // }
+
+            // if (value >= 512 && !ObjType.get(value - 512).validateHeadModel(this.gender) {
+            //     invalid = true;
+            // }
+        }
+
+        if (invalid) {
             return null;
         }
 
@@ -334,7 +387,17 @@ export default class PlayerEntity extends PathingEntity {
         return tmp;
     }
 
-    private getSequencedModel(): Model {
+    private getSequencedModel(): Model | null {
+        if (this.transmogrify) {
+            let transformID: number = -1;
+            if (this.primarySeqId >= 0 && this.primarySeqDelay == 0) {
+                transformID = SeqType.instances[this.primarySeqId].frames![this.primarySeqFrame];
+            } else if (this.secondarySeqId >= 0) {
+                transformID = SeqType.instances[this.secondarySeqId].frames![this.secondarySeqFrame];
+            }
+            return this.transmogrify.getSequencedModel(transformID, -1, null);
+        }
+
         let hashCode: bigint = this.appearanceHashcode;
         let primaryTransformId: number = -1;
         let secondaryTransformId: number = -1;
@@ -348,9 +411,13 @@ export default class PlayerEntity extends PathingEntity {
                 primaryTransformId = seq.frames[this.primarySeqFrame];
             }
             if (this.secondarySeqId >= 0 && this.secondarySeqId !== this.seqStandId) {
-                const secondFrames: Int16Array | null = SeqType.instances[this.secondarySeqId].frames;
-                if (secondFrames) {
-                    secondaryTransformId = secondFrames[this.secondarySeqFrame];
+                const seq2: SeqType | null = SeqType.instances[this.secondarySeqId];
+
+                if (seq2) {
+                    const secondFrames: Int16Array | null = seq2.frames;
+                    if (secondFrames) {
+                        secondaryTransformId = secondFrames[this.secondarySeqFrame];
+                    }
                 }
             }
 
@@ -364,9 +431,13 @@ export default class PlayerEntity extends PathingEntity {
                 hashCode += BigInt(leftHandValue - this.appearances[3]) << 16n;
             }
         } else if (this.secondarySeqId >= 0) {
-            const secondFrames: Int16Array | null = SeqType.instances[this.secondarySeqId].frames;
-            if (secondFrames) {
-                primaryTransformId = secondFrames[this.secondarySeqFrame];
+            const seq2: SeqType | null = SeqType.instances[this.secondarySeqId];
+
+            if (seq2) {
+                const secondFrames: Int16Array | null = seq2.frames;
+                if (secondFrames) {
+                    primaryTransformId = secondFrames[this.secondarySeqFrame];
+                }
             }
         }
 

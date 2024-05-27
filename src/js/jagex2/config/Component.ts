@@ -7,6 +7,9 @@ import Pix24 from '../graphics/Pix24';
 import JString from '../datastruct/JString';
 import {TypedArray1d} from '../util/Arrays';
 import Draw2D from '../graphics/Draw2D';
+import {Client} from '../../client';
+import ObjType from './ObjType';
+import NpcType from './NpcType';
 
 export default class Component {
     static instances: Component[] = [];
@@ -30,6 +33,13 @@ export default class Component {
     static readonly BUTTON_TOGGLE: number = 4;
     static readonly BUTTON_SELECT: number = 5;
     static readonly BUTTON_CONTINUE: number = 6;
+
+    static readonly MODEL_TYPE_NONE: number = 0;
+    static readonly MODEL_TYPE_NORMAL: number = 1;
+    static readonly MODEL_TYPE_NPC: number = 2;
+    static readonly MODEL_TYPE_PLAYER: number = 3;
+    static readonly MODEL_TYPE_OBJ: number = 4;
+    static readonly MODEL_TYPE_PLAYER_DESIGN: number = 5;
 
     // client codes
     //// friends (1-203)
@@ -124,6 +134,7 @@ export default class Component {
             com.clientCode = dat.g2;
             com.width = dat.g2;
             com.height = dat.g2;
+            com.transparency = dat.g1;
 
             com.overLayer = dat.g1;
             if (com.overLayer === 0) {
@@ -162,7 +173,7 @@ export default class Component {
                 com.scroll = dat.g2;
                 com.hide = dat.g1 === 1;
 
-                const childCount: number = dat.g1;
+                const childCount: number = dat.g2;
                 com.childId = new Array(childCount);
                 com.childX = new Array(childCount);
                 com.childY = new Array(childCount);
@@ -185,6 +196,7 @@ export default class Component {
                 com.draggable = dat.g1 === 1;
                 com.interactable = dat.g1 === 1;
                 com.usable = dat.g1 === 1;
+                com.moveReplaces = dat.g1 === 1;
                 com.marginX = dat.g1;
                 com.marginY = dat.g1;
 
@@ -241,6 +253,7 @@ export default class Component {
             if (com.type === Component.TYPE_RECT || com.type === Component.TYPE_TEXT) {
                 com.activeColour = dat.g4;
                 com.overColour = dat.g4;
+                com.activeHoverColour = dat.g4;
             }
 
             if (com.type === Component.TYPE_GRAPHIC) {
@@ -261,12 +274,14 @@ export default class Component {
             if (com.type === Component.TYPE_MODEL) {
                 const model: number = dat.g1;
                 if (model !== 0) {
-                    com.model = this.getModel(((model - 1) << 8) + dat.g1);
+                    com.type = Component.MODEL_TYPE_NORMAL;
+                    com.modelID = ((model - 1) << 8) + dat.g1;
                 }
 
                 const activeModel: number = dat.g1;
                 if (activeModel !== 0) {
-                    com.activeModel = this.getModel(((activeModel - 1) << 8) + dat.g1);
+                    com.activeModelType = Component.MODEL_TYPE_NORMAL;
+                    com.activeModelID = ((activeModel - 1) << 8) + dat.g1;
                 }
 
                 com.anim = dat.g1;
@@ -315,6 +330,10 @@ export default class Component {
                 }
             }
 
+            if (com.type === 8) {
+                com.actionVerb = dat.gjstr;
+            }
+
             if (com.buttonType === Component.BUTTON_TARGET || com.type === Component.TYPE_INV) {
                 com.actionVerb = dat.gjstr;
                 com.action = dat.gjstr;
@@ -361,16 +380,36 @@ export default class Component {
         return image;
     };
 
-    private static getModel = (id: number): Model => {
-        if (this.modelCache) {
-            const model: Model | null = this.modelCache.get(BigInt(id)) as Model | null;
-            if (model) {
-                return model;
-            }
+    public static cacheModel = (id: number, type: number, model: Model): void => {
+        this.modelCache?.clear();
+
+        if (model && type != Component.MODEL_TYPE_OBJ) {
+            this.modelCache?.put(BigInt((type << 16) + id), model);
         }
-        const model: Model = Model.model(id);
-        this.modelCache?.put(BigInt(id), model);
-        return model;
+    };
+
+    private static getModel = (category: number, id: number): Model => {
+        let model: Model | null = this.modelCache?.get(BigInt((category << 16) + id)) as Model | null;
+
+        if (model) {
+            return model;
+        }
+
+        if (category == Component.MODEL_TYPE_NORMAL) {
+            const data: Uint8Array | Jagfile | null = Client.jagStore[1].read(id);
+            model = Model.model(data as Uint8Array, id);
+        } else if (category == Component.MODEL_TYPE_NPC) {
+            model = NpcType.get(id).getHeadModel();
+        } else if (category == Component.MODEL_TYPE_PLAYER) {
+            model = Client.client.getLocalPlayer()?.getHeadModel() || null;
+        } else if (category == Component.MODEL_TYPE_OBJ) {
+            model = ObjType.get(id).getInterfaceModel(50);
+        }
+
+        if (model) {
+            this.modelCache?.put(BigInt((category << 16) + id), model);
+        }
+        return model as Model;
     };
 
     /* Client codes:
@@ -455,6 +494,7 @@ export default class Component {
     usable: boolean = false;
     marginX: number = 0;
     marginY: number = 0;
+    moveReplaces: boolean = false;
     invSlotOffsetX: Int16Array | null = null;
     invSlotOffsetY: Int16Array | null = null;
     invSlotSprite: (Pix24 | null)[] | null = null;
@@ -464,14 +504,17 @@ export default class Component {
     font: PixFont | null = null;
     shadowed: boolean = false;
     text: string | null = null;
+    transparency: number = 0;
     activeText: string | null = null;
     colour: number = 0;
     activeColour: number = 0;
     overColour: number = 0;
+    activeHoverColour: number = 0;
     graphic: Pix24 | null = null;
     activeGraphic: Pix24 | null = null;
-    model: Model | null = null;
-    activeModel: Model | null = null;
+    modelID: number = 0;
+    activeModelType: number = 0;
+    activeModelID: number = 0;
     anim: number = -1;
     activeAnim: number = -1;
     zoom: number = 0;
@@ -489,15 +532,33 @@ export default class Component {
     x: number = 0;
     y: number = 0;
     scrollPosition: number = 0;
+    scrollableHeight: number = 0; // TODO: add this everywhere
     invSlotObjId: Int32Array | null = null;
     invSlotObjCount: Int32Array | null = null;
     seqFrame: number = 0;
     seqCycle: number = 0;
 
+    inventorySwap(src: number, dst: number): void {
+        if (this.invSlotObjId) {
+            const obj: number = this.invSlotObjId[src];
+            this.invSlotObjId[src] = this.invSlotObjId[dst];
+            this.invSlotObjId[dst] = obj;
+        }
+
+        if (this.invSlotObjCount) {
+            const count: number = this.invSlotObjCount[src];
+            this.invSlotObjCount[src] = this.invSlotObjCount[dst];
+            this.invSlotObjCount[dst] = count;
+        }
+    }
+
     getModel(primaryFrame: number, secondaryFrame: number, active: boolean): Model | null {
-        let model: Model | null = this.model;
+        let model: Model | null;
+
         if (active) {
-            model = this.activeModel;
+            model = Component.getModel(this.activeModelType, this.activeModelID);
+        } else {
+            model = Component.getModel(this.type, this.modelID);
         }
 
         if (!model) {
@@ -508,21 +569,21 @@ export default class Component {
             return model;
         }
 
-        const tmp: Model = Model.modelShareColored(model, true, true, false);
+        model = Model.modelShareColored(model, true, true, false);
         if (primaryFrame !== -1 || secondaryFrame !== -1) {
-            tmp.createLabelReferences();
+            model.createLabelReferences();
         }
 
         if (primaryFrame !== -1) {
-            tmp.applyTransform(primaryFrame);
+            model.applyTransform(primaryFrame);
         }
 
         if (secondaryFrame !== -1) {
-            tmp.applyTransform(secondaryFrame);
+            model.applyTransform(secondaryFrame);
         }
 
-        tmp.calculateNormals(64, 768, -50, -10, -50, true);
-        return tmp;
+        model.calculateNormals(64, 768, -50, -10, -50, true);
+        return model;
     }
 
     getAbsoluteX(): number {

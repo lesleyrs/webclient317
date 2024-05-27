@@ -20,7 +20,7 @@ export async function setupConfiguration(): Promise<void> {
 // setup the world config.
 async function world(): Promise<void> {
     if (GameShell.getParameter('world').length === 0) {
-        GameShell.setParameter('world', '1');
+        GameShell.setParameter('world', '0');
     }
     if (['0', '998', '999'].includes(GameShell.getParameter('world'))) {
         localConfiguration();

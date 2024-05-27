@@ -40,4 +40,5 @@ export default class CollisionFlag {
     static readonly BLOCK_NORTH_EAST: number = CollisionFlag.WALL_SOUTH | CollisionFlag.WALL_SOUTH_WEST | CollisionFlag.BLOCK_EAST; // 2621920 0x2801E0
 
     static readonly BOUNDS: number = 0xffffff; // 16777215
+    static readonly FLAG_UNINITIALIZED: number = 0x1000000; // 16777216
 }

@@ -5,17 +5,18 @@ import SpotAnimType from '../../config/SpotAnimType';
 import SeqType from '../../config/SeqType';
 
 export default class NpcEntity extends PathingEntity {
-    static readonly ANIM: number = 0x2;
-    static readonly FACE_ENTITY: number = 0x4;
-    static readonly SAY: number = 0x8;
-    static readonly DAMAGE: number = 0x10;
-    static readonly CHANGE_TYPE: number = 0x20;
-    static readonly SPOTANIM: number = 0x40;
-    static readonly FACE_COORD: number = 0x80;
+    static readonly SAY: number = 0x1;
+    static readonly CHANGE_TYPE: number = 0x2;
+    static readonly FACE_COORD: number = 0x4;
+    static readonly DAMAGE0: number = 0x8;
+    static readonly ANIM: number = 0x10;
+    static readonly FACE_ENTITY: number = 0x20;
+    static readonly DAMAGE1: number = 0x40;
+    static readonly SPOTANIM: number = 0x80;
 
     type: NpcType | null = null;
 
-    draw(_loopCycle: number): Model | null {
+    getModel(): Model | null {
         if (!this.type) {
             return null;
         }
@@ -28,9 +29,15 @@ export default class NpcEntity extends PathingEntity {
         if (!model) {
             return null;
         }
+        this.height = model.minY;
+
         const spotanim: SpotAnimType = SpotAnimType.instances[this.spotanimId];
 
-        const model1: Model = Model.modelShareColored(spotanim.getModel(), true, !spotanim.disposeAlpha, false);
+        let frame: number = -1;
+        if (spotanim.seq && spotanim.seq.frames) {
+            frame = spotanim.seq.frames[this.spotanimFrame];
+        }
+        const model1: Model = Model.modelShareColored(spotanim.getModel(), true, frame === -1, false);
         model1.translate(-this.spotanimOffset, 0, 0);
         model1.createLabelReferences();
         if (spotanim.seq && spotanim.seq.frames) {
@@ -89,7 +96,6 @@ export default class NpcEntity extends PathingEntity {
         if (!model) {
             return null;
         }
-        this.height = model.maxY;
         return model;
     }
 }

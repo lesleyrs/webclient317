@@ -1,6 +1,6 @@
-import Linkable from '../../datastruct/Linkable';
+import Entity from './Entity';
 
-export default class ObjStackEntity extends Linkable {
+export default class ObjStackEntity extends Entity {
     // constructor
     readonly index: number;
     count: number;

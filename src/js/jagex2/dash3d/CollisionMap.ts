@@ -31,7 +31,7 @@ export default class CollisionMap {
                 if (x === 0 || z === 0 || x === this.sizeX - 1 || z === this.sizeZ - 1) {
                     this.flags[index] = CollisionFlag.BOUNDS;
                 } else {
-                    this.flags[index] = CollisionFlag.OPEN;
+                    this.flags[index] = CollisionFlag.FLAG_UNINITIALIZED;
                 }
             }
         }
@@ -407,6 +407,7 @@ export default class CollisionMap {
         return false;
     };
 
+    // TODO addSolid/ removeSolid vs addFloor / removeFloor
     private add = (x: number, z: number, flags: number): void => {
         this.flags[CollisionMap.index(x, z)] |= flags;
     };

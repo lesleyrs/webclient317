@@ -1,3 +1,26 @@
+```
+186- no sound, no input tracking
+194- no sound
+234- OnDemand, OnDemandProvider, OnDemandRequest, FileStream classes added, LocSpawned removed (only LocTemporary now)
+245- MouseTracking class added
+249- Stats and VarbitType classes added
+257- PixFontFull and SoundFilter classes added, InputTracking class removed
+270- PixFontFull replaces PixFont completely
+
+check TODOs, missing ondemand, mousetracking, stats, pixfontfull (replacing pixfont) classes, deleted ts entrypoints, some renaming needed
+didn't always move code into or out of methods as I'd have to compare which are authentic between danes and rs-deob
+317 cache is actually 319 (317 needs more files)
+tested on blakescape/emulous with RSA enabled and websockify 43595 localhost:43594
+
+emulous: quest tab iface not updating, no login appearance iface, stackables ::runes broken, NOTE the crash during death animation happens on a deob too
+structures north of fally show up (wrong), watchtower on upper floor no ground, torches offset watchtower tele, varrock east upper floor doesn't show
+drawparentinterface/drawinterface, rune icons on spellbook
+add taggable string funcs + why are typing tags in chat offsetting it? EG @gre@
+dropped items positions wrong, add player team+transmog
+instanced buildscene, npc dialogue check, check special attacks combat tab, cacheloads?, T1 and T2 errors for info?, check to unload new vars
+could add a loadmodel() like viewer.ts (not authentic but if not adding ondemand)
+```
+
 <div align="center">
 
 <h1>2004Scape Client2 - May 18, 2004</h1>

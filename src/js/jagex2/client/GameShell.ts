@@ -3,7 +3,6 @@ import Draw3D from '../graphics/Draw3D';
 
 import {sleep} from '../util/JsUtil';
 import {CanvasEnabledKeys, KeyCodes} from './KeyCodes';
-import InputTracking from './InputTracking';
 import {canvas, canvas2d} from '../graphics/Canvas';
 
 export default abstract class GameShell {
@@ -406,10 +405,6 @@ export default abstract class GameShell {
             this.keyQueueWritePos = (this.keyQueueWritePos + 1) & 0x7f;
         }
 
-        if (InputTracking.enabled) {
-            InputTracking.keyPressed(ch);
-        }
-
         if (!CanvasEnabledKeys.includes(key)) {
             e.preventDefault();
         }
@@ -471,10 +466,6 @@ export default abstract class GameShell {
             this.actionKey[ch] = 0;
         }
 
-        if (InputTracking.enabled) {
-            InputTracking.keyReleased(ch);
-        }
-
         if (!CanvasEnabledKeys.includes(key)) {
             e.preventDefault();
         }
@@ -513,28 +504,16 @@ export default abstract class GameShell {
                 this.mouseButton = 1;
             }
         }
-
-        if (InputTracking.enabled) {
-            InputTracking.mousePressed(this.mouseClickX, this.mouseClickY, e.buttons);
-        }
     };
 
     private onmouseup = (e: MouseEvent): void => {
         this.setMousePosition(e);
         this.idleCycles = Date.now();
         this.mouseButton = 0;
-
-        if (InputTracking.enabled) {
-            InputTracking.mouseReleased(e.buttons);
-        }
     };
 
     private onmouseenter = (e: MouseEvent): void => {
         this.setMousePosition(e);
-
-        if (InputTracking.enabled) {
-            InputTracking.mouseEntered();
-        }
     };
 
     private onmouseleave = (e: MouseEvent): void => {
@@ -549,37 +528,21 @@ export default abstract class GameShell {
         this.mouseButton = 0;
         this.mouseClickX = -1;
         this.mouseClickY = -1;
-
-        if (InputTracking.enabled) {
-            InputTracking.mouseExited();
-        }
     };
 
     private onmousemove = (e: MouseEvent): void => {
         this.setMousePosition(e);
         this.idleCycles = Date.now();
-
-        if (InputTracking.enabled) {
-            InputTracking.mouseMoved(this.mouseX, this.mouseY);
-        }
     };
 
-    private onfocus = (e: FocusEvent): void => {
+    private onfocus = (_e: FocusEvent): void => {
         this.hasFocus = true; // mapview applet
         this.redrawScreen = true;
         this.refresh();
-
-        if (InputTracking.enabled) {
-            InputTracking.focusGained();
-        }
     };
 
-    private onblur = (e: FocusEvent): void => {
+    private onblur = (_e: FocusEvent): void => {
         this.hasFocus = false; // mapview applet
-
-        if (InputTracking.enabled) {
-            InputTracking.focusLost();
-        }
     };
 
     private ontouchstart = (e: TouchEvent): void => {
@@ -865,8 +828,8 @@ export default abstract class GameShell {
     };
 
     private setMousePosition = (e: MouseEvent): void => {
-        const fixedWidth: number = 789;
-        const fixedHeight: number = 532;
+        const fixedWidth: number = 765;
+        const fixedHeight: number = 503;
 
         if (this.isFullScreen()) {
             const element: HTMLElement = e.target as HTMLElement;

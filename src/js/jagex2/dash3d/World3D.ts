@@ -25,7 +25,7 @@ export default class World3D {
     private static activeOccluders: (Occluder | null)[] = new TypedArray1d(500, null);
     private static drawTileQueue: LinkList = new LinkList();
 
-    private static cycle: number = 0;
+    public static cycle: number = 0;
 
     private static viewportLeft: number = 0;
     private static viewportTop: number = 0;
@@ -277,7 +277,9 @@ export default class World3D {
 
         for (let stx: number = 0; stx < this.maxTileX; stx++) {
             for (let stz: number = 0; stz < this.maxTileZ; stz++) {
-                this.levelTiles[level][stx][stz] = new Tile(level, stx, stz);
+                if (!this.levelTiles[level][stx][stz]) {
+                    this.levelTiles[level][stx][stz] = new Tile(level, stx, stz);
+                }
             }
         }
     };
@@ -289,6 +291,13 @@ export default class World3D {
             const tile: Tile | null = this.levelTiles[level][stx][stz];
             if (tile) {
                 tile.level--;
+
+                for (let i: number = 0; i < tile.locCount; i++) {
+                    const loc: Loc | null = tile.locs[i];
+                    if (loc && ((loc.bitset >> 29) & 0x3) === 2 && loc.minSceneTileX === stx && loc.minSceneTileZ === stz) {
+                        loc.level--;
+                    }
+                }
             }
         }
 
@@ -385,13 +394,16 @@ export default class World3D {
         }
     };
 
-    addGroundDecoration = (model: Model | null, tileLevel: number, tileX: number, tileZ: number, y: number, bitset: number, info: number): void => {
+    addGroundDecoration = (entity: Entity | null, tileLevel: number, tileX: number, tileZ: number, y: number, bitset: number, info: number): void => {
+        if (!entity) {
+            return;
+        }
         if (!this.levelTiles[tileLevel][tileX][tileZ]) {
             this.levelTiles[tileLevel][tileX][tileZ] = new Tile(tileLevel, tileX, tileZ);
         }
         const tile: Tile | null = this.levelTiles[tileLevel][tileX][tileZ];
         if (tile) {
-            tile.groundDecoration = new GroundDecoration(y, tileX * 128 + 64, tileZ * 128 + 64, model, bitset, info);
+            tile.groundDecoration = new GroundDecoration(y, tileX * 128 + 64, tileZ * 128 + 64, entity, bitset, info);
         }
     };
 
@@ -404,16 +416,17 @@ export default class World3D {
         tile.groundDecoration = null;
     };
 
-    addObjStack = (stx: number, stz: number, y: number, level: number, bitset: number, topObj: Model | null, middleObj: Model | null, bottomObj: Model | null): void => {
+    addObjStack = (stx: number, stz: number, y: number, level: number, bitset: number, topObj: Entity | null, middleObj: Entity | null, bottomObj: Entity | null): void => {
         let stackOffset: number = 0;
         const tile: Tile | null = this.levelTiles[level][stx][stz];
         if (tile) {
             for (let l: number = 0; l < tile.locCount; l++) {
                 const loc: Loc | null = tile.locs[l];
-                if (!loc || !loc.model) {
+                if (!loc || loc.entity instanceof Model) {
                     continue;
                 }
-                const height: number = loc.model.objRaise;
+
+                const height: number = (loc.entity as Model).objRaise;
                 if (height > stackOffset) {
                     stackOffset = height;
                 }
@@ -436,8 +449,8 @@ export default class World3D {
         tile.objStack = null;
     };
 
-    addWall = (level: number, tileX: number, tileZ: number, y: number, typeA: number, typeB: number, modelA: Model | null, modelB: Model | null, bitset: number, info: number): void => {
-        if (!modelA && !modelB) {
+    addWall = (level: number, tileX: number, tileZ: number, y: number, typeA: number, typeB: number, entityA: Entity | null, entityB: Entity | null, bitset: number, info: number): void => {
+        if (!entityA && !entityB) {
             return;
         }
         for (let l: number = level; l >= 0; l--) {
@@ -447,7 +460,7 @@ export default class World3D {
         }
         const tile: Tile | null = this.levelTiles[level][tileX][tileZ];
         if (tile) {
-            tile.wall = new Wall(y, tileX * 128 + 64, tileZ * 128 + 64, typeA, typeB, modelA, modelB, bitset, info);
+            tile.wall = new Wall(y, tileX * 128 + 64, tileZ * 128 + 64, typeA, typeB, entityA, entityB, bitset, info);
         }
     };
 
@@ -458,8 +471,8 @@ export default class World3D {
         }
     };
 
-    setWallDecoration = (level: number, tileX: number, tileZ: number, y: number, offsetX: number, offsetZ: number, bitset: number, model: Model | null, info: number, angle: number, type: number): void => {
-        if (!model) {
+    setWallDecoration = (level: number, tileX: number, tileZ: number, y: number, offsetX: number, offsetZ: number, bitset: number, entity: Entity | null, info: number, angle: number, type: number): void => {
+        if (!entity) {
             return;
         }
         for (let l: number = level; l >= 0; l--) {
@@ -469,7 +482,7 @@ export default class World3D {
         }
         const tile: Tile | null = this.levelTiles[level][tileX][tileZ];
         if (tile) {
-            tile.wallDecoration = new WallDecoration(y, tileX * 128 + offsetX + 64, tileZ * 128 + offsetZ + 64, type, angle, model, bitset, info);
+            tile.wallDecoration = new WallDecoration(y, tileX * 128 + offsetX + 64, tileZ * 128 + offsetZ + 64, type, angle, entity, bitset, info);
         }
     };
 
@@ -499,86 +512,13 @@ export default class World3D {
         decor.z = sz + ((((decor.z - sz) * offset) / 16) | 0);
     };
 
-    setWallDecorationModel = (level: number, x: number, z: number, model: Model | null): void => {
-        if (!model) {
-            return;
-        }
-
-        const tile: Tile | null = this.levelTiles[level][x][z];
-        if (!tile) {
-            return;
-        }
-
-        const decor: WallDecoration | null = tile.wallDecoration;
-        if (!decor) {
-            return;
-        }
-
-        decor.model = model;
-    };
-
-    setGroundDecorationModel = (level: number, x: number, z: number, model: Model | null): void => {
-        if (!model) {
-            return;
-        }
-
-        const tile: Tile | null = this.levelTiles[level][x][z];
-        if (!tile) {
-            return;
-        }
-
-        const decor: GroundDecoration | null = tile.groundDecoration;
-        if (!decor) {
-            return;
-        }
-
-        decor.model = model;
-    };
-
-    setWallModel = (level: number, x: number, z: number, model: Model | null): void => {
-        if (!model) {
-            return;
-        }
-
-        const tile: Tile | null = this.levelTiles[level][x][z];
-        if (!tile) {
-            return;
-        }
-
-        const wall: Wall | null = tile.wall;
-        if (!wall) {
-            return;
-        }
-
-        wall.modelA = model;
-    };
-
-    setWallModels = (x: number, z: number, level: number, modelA: Model | null, modelB: Model | null): void => {
-        if (!modelA) {
-            return;
-        }
-
-        const tile: Tile | null = this.levelTiles[level][x][z];
-        if (!tile) {
-            return;
-        }
-
-        const wall: Wall | null = tile.wall;
-        if (!wall) {
-            return;
-        }
-
-        wall.modelA = modelA;
-        wall.modelB = modelB;
-    };
-
-    addLoc = (level: number, tileX: number, tileZ: number, y: number, model: Model | null, entity: Entity | null, bitset: number, info: number, width: number, length: number, yaw: number): boolean => {
-        if (!model && !entity) {
+    addLoc = (level: number, tileX: number, tileZ: number, y: number, entity: Entity | null, bitset: number, info: number, width: number, length: number, yaw: number): boolean => {
+        if (!entity) {
             return true;
         }
         const sceneX: number = tileX * 128 + width * 64;
         const sceneZ: number = tileZ * 128 + length * 64;
-        return this.addLoc2(sceneX, sceneZ, y, level, tileX, tileZ, width, length, model, entity, bitset, info, yaw, false);
+        return this.addLoc2(sceneX, sceneZ, y, level, tileX, tileZ, width, length, entity, bitset, info, yaw, false);
     };
 
     addTemporary = (level: number, x: number, y: number, z: number, model: Model | null, entity: Entity | null, bitset: number, yaw: number, padding: number, forwardPadding: boolean): boolean => {
@@ -607,11 +547,11 @@ export default class World3D {
         z0 = (z0 / 128) | 0;
         x1 = (x1 / 128) | 0;
         z1 = (z1 / 128) | 0;
-        return this.addLoc2(x, z, y, level, x0, z0, x1 + 1 - x0, z1 - z0 + 1, model, entity, bitset, 0, yaw, true);
+        return this.addLoc2(x, z, y, level, x0, z0, x1 + 1 - x0, z1 - z0 + 1, entity, bitset, 0, yaw, true);
     };
 
     addTemporary2 = (level: number, x: number, y: number, z: number, minTileX: number, minTileZ: number, maxTileX: number, maxTileZ: number, model: Model | null, entity: Entity | null, bitset: number, yaw: number): boolean => {
-        return (!model && !entity) || this.addLoc2(x, z, y, level, minTileX, minTileZ, maxTileX + 1 - minTileX, maxTileZ - minTileZ + 1, model, entity, bitset, 0, yaw, true);
+        return (!model && !entity) || this.addLoc2(x, z, y, level, minTileX, minTileZ, maxTileX + 1 - minTileX, maxTileZ - minTileZ + 1, entity, bitset, 0, yaw, true);
     };
 
     removeLoc = (level: number, x: number, z: number): void => {
@@ -629,25 +569,6 @@ export default class World3D {
         }
     };
 
-    setLocModel = (level: number, x: number, z: number, model: Model | null): void => {
-        if (!model) {
-            return;
-        }
-
-        const tile: Tile | null = this.levelTiles[level][x][z];
-        if (!tile) {
-            return;
-        }
-
-        for (let i: number = 0; i < tile.locCount; i++) {
-            const loc: Loc | null = tile.locs[i];
-            if (loc && ((loc.bitset >> 29) & 0x3) === 2) {
-                loc.model = model;
-                return;
-            }
-        }
-    };
-
     clearTemporaryLocs = (): void => {
         for (let i: number = 0; i < this.temporaryLocCount; i++) {
             const loc: Loc | null = this.temporaryLocs[i];
@@ -658,6 +579,37 @@ export default class World3D {
         }
 
         this.temporaryLocCount = 0;
+    };
+
+    getWall = (level: number, x: number, z: number): Wall | null => {
+        const tile: Tile | null = this.levelTiles[level][x][z];
+        return tile ? tile.wall : null;
+    };
+
+    getWallDecoration = (level: number, x: number, z: number): WallDecoration | null => {
+        const tile: Tile | null = this.levelTiles[level][x][z];
+        return tile ? tile.wallDecoration : null;
+    };
+
+    getLoc = (level: number, x: number, z: number): Loc | null => {
+        const tile: Tile | null = this.levelTiles[level][x][z];
+        if (tile === null) {
+            return null;
+        }
+        for (let l: number = 0; l < tile.locCount; l++) {
+            const loc: Loc | null = tile.locs[l];
+            if (loc) {
+                if (((loc.bitset >> 29) & 3) == 2 && loc.minSceneTileX === x && loc.minSceneTileZ === z) {
+                    return loc;
+                }
+            }
+        }
+        return null;
+    };
+
+    getGroundDecoration = (z: number, x: number, level: number): GroundDecoration | null => {
+        const tile: Tile | null = this.levelTiles[level][x][z];
+        return !tile || !tile.groundDecoration ? null : tile.groundDecoration;
     };
 
     getWallBitset = (level: number, x: number, z: number): number => {
@@ -725,28 +677,28 @@ export default class World3D {
                     }
 
                     const wall: Wall | null = tile.wall;
-                    if (wall && wall.modelA && wall.modelA.vertexNormal) {
-                        this.mergeLocNormals(level, tileX, tileZ, 1, 1, wall.modelA);
-                        if (wall.modelB && wall.modelB.vertexNormal) {
-                            this.mergeLocNormals(level, tileX, tileZ, 1, 1, wall.modelB);
-                            this.mergeNormals(wall.modelA, wall.modelB, 0, 0, 0, false);
-                            wall.modelB.applyLighting(lightAmbient, attenuation, lightSrcX, lightSrcY, lightSrcZ);
+                    if (wall && wall.entityA && wall.entityA.vertexNormal) {
+                        this.mergeLocNormals(level, tileX, tileZ, 1, 1, wall.entityA as Model);
+                        if (wall.entityB && wall.entityB.vertexNormal) {
+                            this.mergeLocNormals(level, tileX, tileZ, 1, 1, wall.entityB as Model);
+                            this.mergeNormals(wall.entityA as Model, wall.entityB as Model, 0, 0, 0, false);
+                            (wall.entityB as Model).applyLighting(lightAmbient, attenuation, lightSrcX, lightSrcY, lightSrcZ);
                         }
-                        wall.modelA.applyLighting(lightAmbient, attenuation, lightSrcX, lightSrcY, lightSrcZ);
+                        (wall.entityA as Model).applyLighting(lightAmbient, attenuation, lightSrcX, lightSrcY, lightSrcZ);
                     }
 
                     for (let i: number = 0; i < tile.locCount; i++) {
                         const loc: Loc | null = tile.locs[i];
-                        if (loc && loc.model && loc.model.vertexNormal) {
-                            this.mergeLocNormals(level, tileX, tileZ, loc.maxSceneTileX + 1 - loc.minSceneTileX, loc.maxSceneTileZ - loc.minSceneTileZ + 1, loc.model);
-                            loc.model.applyLighting(lightAmbient, attenuation, lightSrcX, lightSrcY, lightSrcZ);
+                        if (loc && loc.entity && loc.entity.vertexNormal) {
+                            this.mergeLocNormals(level, tileX, tileZ, loc.maxSceneTileX + 1 - loc.minSceneTileX, loc.maxSceneTileZ - loc.minSceneTileZ + 1, loc.entity as Model);
+                            (loc.entity as Model).applyLighting(lightAmbient, attenuation, lightSrcX, lightSrcY, lightSrcZ);
                         }
                     }
 
                     const decor: GroundDecoration | null = tile.groundDecoration;
-                    if (decor && decor.model && decor.model.vertexNormal) {
-                        this.mergeGroundDecorationNormals(level, tileX, tileZ, decor.model);
-                        decor.model.applyLighting(lightAmbient, attenuation, lightSrcX, lightSrcY, lightSrcZ);
+                    if (decor && decor.entity && decor.entity.vertexNormal) {
+                        this.mergeGroundDecorationNormals(level, tileX, tileZ, decor.entity as Model);
+                        (decor.entity as Model).applyLighting(lightAmbient, attenuation, lightSrcX, lightSrcY, lightSrcZ);
                     }
                 }
             }
@@ -756,29 +708,29 @@ export default class World3D {
     mergeGroundDecorationNormals = (level: number, tileX: number, tileZ: number, model: Model): void => {
         if (tileX < this.maxTileX) {
             const tile: Tile | null = this.levelTiles[level][tileX + 1][tileZ];
-            if (tile && tile.groundDecoration && tile.groundDecoration.model && tile.groundDecoration.model.vertexNormal) {
-                this.mergeNormals(model, tile.groundDecoration.model, 128, 0, 0, true);
+            if (tile && tile.groundDecoration && tile.groundDecoration.entity && tile.groundDecoration.entity.vertexNormal) {
+                this.mergeNormals(model, tile.groundDecoration.entity as Model, 128, 0, 0, true);
             }
         }
 
         if (tileZ < this.maxTileX) {
             const tile: Tile | null = this.levelTiles[level][tileX][tileZ + 1];
-            if (tile && tile.groundDecoration && tile.groundDecoration.model && tile.groundDecoration.model.vertexNormal) {
-                this.mergeNormals(model, tile.groundDecoration.model, 0, 0, 128, true);
+            if (tile && tile.groundDecoration && tile.groundDecoration.entity && tile.groundDecoration.entity.vertexNormal) {
+                this.mergeNormals(model, tile.groundDecoration.entity as Model, 0, 0, 128, true);
             }
         }
 
         if (tileX < this.maxTileX && tileZ < this.maxTileZ) {
             const tile: Tile | null = this.levelTiles[level][tileX + 1][tileZ + 1];
-            if (tile && tile.groundDecoration && tile.groundDecoration.model && tile.groundDecoration.model.vertexNormal) {
-                this.mergeNormals(model, tile.groundDecoration.model, 128, 0, 128, true);
+            if (tile && tile.groundDecoration && tile.groundDecoration.entity && tile.groundDecoration.entity.vertexNormal) {
+                this.mergeNormals(model, tile.groundDecoration.entity as Model, 128, 0, 128, true);
             }
         }
 
         if (tileX < this.maxTileX && tileZ > 0) {
             const tile: Tile | null = this.levelTiles[level][tileX + 1][tileZ - 1];
-            if (tile && tile.groundDecoration && tile.groundDecoration.model && tile.groundDecoration.model.vertexNormal) {
-                this.mergeNormals(model, tile.groundDecoration.model, 128, 0, -128, true);
+            if (tile && tile.groundDecoration && tile.groundDecoration.entity && tile.groundDecoration.entity.vertexNormal) {
+                this.mergeNormals(model, tile.groundDecoration.entity as Model, 128, 0, -128, true);
             }
         }
     };
@@ -818,23 +770,23 @@ export default class World3D {
                         (((this.levelHeightmaps[level][tileX][tileZ] + this.levelHeightmaps[level][tileX + 1][tileZ] + this.levelHeightmaps[level][tileX][tileZ + 1] + this.levelHeightmaps[level][tileX + 1][tileZ + 1]) / 4) | 0);
 
                     const wall: Wall | null = tile.wall;
-                    if (wall && wall.modelA && wall.modelA.vertexNormal) {
-                        this.mergeNormals(model, wall.modelA, offsetX, offsetY, offsetZ, allowFaceRemoval);
+                    if (wall && wall.entityA && wall.entityA.vertexNormal) {
+                        this.mergeNormals(model, wall.entityA as Model, offsetX, offsetY, offsetZ, allowFaceRemoval);
                     }
 
-                    if (wall && wall.modelB && wall.modelB.vertexNormal) {
-                        this.mergeNormals(model, wall.modelB, offsetX, offsetY, offsetZ, allowFaceRemoval);
+                    if (wall && wall.entityB && wall.entityB.vertexNormal) {
+                        this.mergeNormals(model, wall.entityB as Model, offsetX, offsetY, offsetZ, allowFaceRemoval);
                     }
 
                     for (let i: number = 0; i < tile.locCount; i++) {
                         const loc: Loc | null = tile.locs[i];
-                        if (!loc || !loc.model || !loc.model.vertexNormal) {
+                        if (!loc || !loc.entity || !loc.entity.vertexNormal) {
                             continue;
                         }
 
                         const locTileSizeX: number = loc.maxSceneTileX + 1 - loc.minSceneTileX;
                         const locTileSizeZ: number = loc.maxSceneTileZ + 1 - loc.minSceneTileZ;
-                        this.mergeNormals(model, loc.model, (loc.minSceneTileX - tileX) * 128 + (locTileSizeX - tileSizeX) * 64, offsetY, (loc.minSceneTileZ - tileZ) * 128 + (locTileSizeZ - tileSizeZ) * 64, allowFaceRemoval);
+                        this.mergeNormals(model, loc.entity as Model, (loc.minSceneTileX - tileX) * 128 + (locTileSizeX - tileSizeX) * 64, offsetY, (loc.minSceneTileZ - tileZ) * 128 + (locTileSizeZ - tileSizeZ) * 64, allowFaceRemoval);
                     }
                 }
             }
@@ -988,7 +940,7 @@ export default class World3D {
         World3D.clickTileZ = -1;
     };
 
-    draw = (eyeX: number, eyeY: number, eyeZ: number, topLevel: number, eyeYaw: number, eyePitch: number, loopCycle: number): void => {
+    draw = (eyeX: number, eyeY: number, eyeZ: number, topLevel: number, eyeYaw: number, eyePitch: number): void => {
         if (eyeX < 0) {
             eyeX = 0;
         } else if (eyeX >= this.maxTileX * 128) {
@@ -1079,14 +1031,14 @@ export default class World3D {
                         if (forwardTileZ >= World3D.minDrawTileZ) {
                             tile = tiles[rightTileX][forwardTileZ];
                             if (tile && tile.visible) {
-                                this.drawTile(tile, true, loopCycle);
+                                this.drawTile(tile, true);
                             }
                         }
 
                         if (backwardTileZ < World3D.maxDrawTileZ) {
                             tile = tiles[rightTileX][backwardTileZ];
                             if (tile && tile.visible) {
-                                this.drawTile(tile, true, loopCycle);
+                                this.drawTile(tile, true);
                             }
                         }
                     }
@@ -1095,14 +1047,14 @@ export default class World3D {
                         if (forwardTileZ >= World3D.minDrawTileZ) {
                             tile = tiles[leftTileX][forwardTileZ];
                             if (tile && tile.visible) {
-                                this.drawTile(tile, true, loopCycle);
+                                this.drawTile(tile, true);
                             }
                         }
 
                         if (backwardTileZ < World3D.maxDrawTileZ) {
                             tile = tiles[leftTileX][backwardTileZ];
                             if (tile && tile.visible) {
-                                this.drawTile(tile, true, loopCycle);
+                                this.drawTile(tile, true);
                             }
                         }
                     }
@@ -1132,14 +1084,14 @@ export default class World3D {
                         if (forwardTileZ >= World3D.minDrawTileZ) {
                             tile = tiles[rightTileX][forwardTileZ];
                             if (tile && tile.visible) {
-                                this.drawTile(tile, false, loopCycle);
+                                this.drawTile(tile, false);
                             }
                         }
 
                         if (backgroundTileZ < World3D.maxDrawTileZ) {
                             tile = tiles[rightTileX][backgroundTileZ];
                             if (tile && tile.visible) {
-                                this.drawTile(tile, false, loopCycle);
+                                this.drawTile(tile, false);
                             }
                         }
                     }
@@ -1148,14 +1100,14 @@ export default class World3D {
                         if (forwardTileZ >= World3D.minDrawTileZ) {
                             tile = tiles[leftTileX][forwardTileZ];
                             if (tile && tile.visible) {
-                                this.drawTile(tile, false, loopCycle);
+                                this.drawTile(tile, false);
                             }
                         }
 
                         if (backgroundTileZ < World3D.maxDrawTileZ) {
                             tile = tiles[leftTileX][backgroundTileZ];
                             if (tile && tile.visible) {
-                                this.drawTile(tile, false, loopCycle);
+                                this.drawTile(tile, false);
                             }
                         }
                     }
@@ -1167,25 +1119,11 @@ export default class World3D {
                 }
             }
         }
+        World3D.takingInput = false;
     };
 
-    private addLoc2 = (
-        x: number,
-        z: number,
-        y: number,
-        level: number,
-        tileX: number,
-        tileZ: number,
-        tileSizeX: number,
-        tileSizeZ: number,
-        model: Model | null,
-        entity: Entity | null,
-        bitset: number,
-        info: number,
-        yaw: number,
-        temporary: boolean
-    ): boolean => {
-        if (!model && !entity) {
+    private addLoc2 = (x: number, z: number, y: number, level: number, tileX: number, tileZ: number, tileSizeX: number, tileSizeZ: number, entity: Entity | null, bitset: number, info: number, yaw: number, temporary: boolean): boolean => {
+        if (!entity) {
             return false;
         }
         for (let tx: number = tileX; tx < tileX + tileSizeX; tx++) {
@@ -1199,7 +1137,7 @@ export default class World3D {
                 }
             }
         }
-        const loc: Loc = new Loc(level, y, x, z, model, entity, yaw, tileX, tileX + tileSizeX - 1, tileZ, tileZ + tileSizeZ - 1, bitset, info);
+        const loc: Loc = new Loc(level, y, x, z, entity, yaw, tileX, tileX + tileSizeX - 1, tileZ, tileZ + tileSizeZ - 1, bitset, info);
         for (let tx: number = tileX; tx < tileX + tileSizeX; tx++) {
             for (let tz: number = tileZ; tz < tileZ + tileSizeZ; tz++) {
                 let spans: number = 0;
@@ -1393,7 +1331,7 @@ export default class World3D {
         }
     };
 
-    private drawTile = (next: Tile, checkAdjacent: boolean, loopCycle: number): void => {
+    private drawTile = (next: Tile, checkAdjacent: boolean): void => {
         World3D.drawTileQueue.addTail(next);
 
         // eslint-disable-next-line no-constant-condition
@@ -1474,18 +1412,14 @@ export default class World3D {
 
                     const wall: Wall | null = bridge.wall;
                     if (wall) {
-                        wall.modelA?.draw(0, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, wall.x - World3D.eyeX, wall.y - World3D.eyeY, wall.z - World3D.eyeZ, wall.bitset);
+                        wall.entityA?.draw(0, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, wall.x - World3D.eyeX, wall.y - World3D.eyeY, wall.z - World3D.eyeZ, wall.bitset);
                     }
 
                     for (let i: number = 0; i < bridge.locCount; i++) {
                         const loc: Loc | null = bridge.locs[i];
 
-                        if (loc) {
-                            let model: Model | null = loc.model;
-                            if (!model) {
-                                model = loc.entity?.draw(loopCycle) ?? null;
-                            }
-                            model?.draw(loc.yaw, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, loc.x - World3D.eyeX, loc.y - World3D.eyeY, loc.z - World3D.eyeZ, loc.bitset);
+                        if (loc && loc.entity) {
+                            loc.entity.draw(loc.yaw, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, loc.x - World3D.eyeX, loc.y - World3D.eyeY, loc.z - World3D.eyeZ, loc.bitset);
                         }
                     }
                 }
@@ -1546,17 +1480,17 @@ export default class World3D {
                     }
 
                     if ((wall.typeA & frontWallTypes) !== 0 && !this.wallVisible(occludeLevel, tileX, tileZ, wall.typeA)) {
-                        wall.modelA?.draw(0, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, wall.x - World3D.eyeX, wall.y - World3D.eyeY, wall.z - World3D.eyeZ, wall.bitset);
+                        wall.entityA?.draw(0, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, wall.x - World3D.eyeX, wall.y - World3D.eyeY, wall.z - World3D.eyeZ, wall.bitset);
                     }
 
                     if ((wall.typeB & frontWallTypes) !== 0 && !this.wallVisible(occludeLevel, tileX, tileZ, wall.typeB)) {
-                        wall.modelB?.draw(0, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, wall.x - World3D.eyeX, wall.y - World3D.eyeY, wall.z - World3D.eyeZ, wall.bitset);
+                        wall.entityB?.draw(0, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, wall.x - World3D.eyeX, wall.y - World3D.eyeY, wall.z - World3D.eyeZ, wall.bitset);
                     }
                 }
 
-                if (decor && !this.visible(occludeLevel, tileX, tileZ, decor.model.maxY)) {
+                if (decor && !this.visible(occludeLevel, tileX, tileZ, decor.entity.minY)) {
                     if ((decor.type & frontWallTypes) !== 0) {
-                        decor.model.draw(decor.angle, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, decor.x - World3D.eyeX, decor.y - World3D.eyeY, decor.z - World3D.eyeZ, decor.bitset);
+                        decor.entity.draw(decor.angle, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, decor.x - World3D.eyeX, decor.y - World3D.eyeY, decor.z - World3D.eyeZ, decor.bitset);
                     } else if ((decor.type & 0x300) !== 0) {
                         const x: number = decor.x - World3D.eyeX;
                         const y: number = decor.y - World3D.eyeY;
@@ -1580,13 +1514,13 @@ export default class World3D {
                         if ((decor.type & 0x100) !== 0 && nearestZ < nearestX) {
                             const drawX: number = x + World3D.WALL_DECORATION_INSET_X[angle];
                             const drawZ: number = z + World3D.WALL_DECORATION_INSET_Z[angle];
-                            decor.model.draw(angle * 512 + 256, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, drawX, y, drawZ, decor.bitset);
+                            decor.entity.draw(angle * 512 + 256, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, drawX, y, drawZ, decor.bitset);
                         }
 
                         if ((decor.type & 0x200) !== 0 && nearestZ > nearestX) {
                             const drawX: number = x + World3D.WALL_DECORATION_OUTSET_X[angle];
                             const drawZ: number = z + World3D.WALL_DECORATION_OUTSET_Z[angle];
-                            decor.model.draw((angle * 512 + 1280) & 0x7ff, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, drawX, y, drawZ, decor.bitset);
+                            decor.entity.draw((angle * 512 + 1280) & 0x7ff, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, drawX, y, drawZ, decor.bitset);
                         }
                     }
                 }
@@ -1594,7 +1528,7 @@ export default class World3D {
                 if (tileDrawn) {
                     const groundDecor: GroundDecoration | null = tile.groundDecoration;
                     if (groundDecor) {
-                        groundDecor.model?.draw(0, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, groundDecor.x - World3D.eyeX, groundDecor.y - World3D.eyeY, groundDecor.z - World3D.eyeZ, groundDecor.bitset);
+                        groundDecor.entity?.draw(0, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, groundDecor.x - World3D.eyeX, groundDecor.y - World3D.eyeY, groundDecor.z - World3D.eyeZ, groundDecor.bitset);
                     }
 
                     const objs: ObjStack | null = tile.objStack;
@@ -1663,7 +1597,7 @@ export default class World3D {
                     const wall: Wall | null = tile.wall;
 
                     if (wall && !this.wallVisible(occludeLevel, tileX, tileZ, wall.typeA)) {
-                        wall.modelA?.draw(0, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, wall.x - World3D.eyeX, wall.y - World3D.eyeY, wall.z - World3D.eyeZ, wall.bitset);
+                        wall.entityA?.draw(0, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, wall.x - World3D.eyeX, wall.y - World3D.eyeY, wall.z - World3D.eyeZ, wall.bitset);
                     }
 
                     tile.checkLocSpans = 0;
@@ -1757,6 +1691,18 @@ export default class World3D {
                             if (loc.distance > farthestDistance) {
                                 farthestDistance = loc.distance;
                                 farthestIndex = index;
+                            } else {
+                                const loc2: Loc | null = World3D.locBuffer[farthestIndex];
+                                if (loc2) {
+                                    const dx0: number = loc.x - World3D.eyeX;
+                                    const dz0: number = loc.z - World3D.eyeZ;
+                                    const dx1: number = loc2.x - World3D.eyeX;
+                                    const dz1: number = loc2.z - World3D.eyeZ;
+
+                                    if (dx0 * dx0 + dz0 * dz0 > dx1 * dx1 + dz1 * dz1) {
+                                        farthestIndex = index;
+                                    }
+                                }
                             }
                         }
                     }
@@ -1769,13 +1715,8 @@ export default class World3D {
                     if (farthest) {
                         farthest.cycle = World3D.cycle;
 
-                        let model: Model | null = farthest.model;
-                        if (!model) {
-                            model = farthest.entity?.draw(loopCycle) ?? null;
-                        }
-
-                        if (model && !this.locVisible(occludeLevel, farthest.minSceneTileX, farthest.maxSceneTileX, farthest.minSceneTileZ, farthest.maxSceneTileZ, model.maxY)) {
-                            model.draw(farthest.yaw, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, farthest.x - World3D.eyeX, farthest.y - World3D.eyeY, farthest.z - World3D.eyeZ, farthest.bitset);
+                        if (farthest.entity && !this.locVisible(occludeLevel, farthest.minSceneTileX, farthest.maxSceneTileX, farthest.minSceneTileZ, farthest.maxSceneTileZ, farthest.entity.minY)) {
+                            farthest.entity.draw(farthest.yaw, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, farthest.x - World3D.eyeX, farthest.y - World3D.eyeY, farthest.z - World3D.eyeZ, farthest.bitset);
                         }
 
                         for (let x: number = farthest.minSceneTileX; x <= farthest.maxSceneTileX; x++) {
@@ -1853,9 +1794,9 @@ export default class World3D {
             if (tile.backWallTypes !== 0) {
                 const decor: WallDecoration | null = tile.wallDecoration;
 
-                if (decor && !this.visible(occludeLevel, tileX, tileZ, decor.model.maxY)) {
+                if (decor && !this.visible(occludeLevel, tileX, tileZ, decor.entity.minY)) {
                     if ((decor.type & tile.backWallTypes) !== 0) {
-                        decor.model.draw(decor.angle, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, decor.x - World3D.eyeX, decor.y - World3D.eyeY, decor.z - World3D.eyeZ, decor.bitset);
+                        decor.entity.draw(decor.angle, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, decor.x - World3D.eyeX, decor.y - World3D.eyeY, decor.z - World3D.eyeZ, decor.bitset);
                     } else if ((decor.type & 0x300) !== 0) {
                         const x: number = decor.x - World3D.eyeX;
                         const y: number = decor.y - World3D.eyeY;
@@ -1879,13 +1820,13 @@ export default class World3D {
                         if ((decor.type & 0x100) !== 0 && nearestZ >= nearestX) {
                             const drawX: number = x + World3D.WALL_DECORATION_INSET_X[angle];
                             const drawZ: number = z + World3D.WALL_DECORATION_INSET_Z[angle];
-                            decor.model.draw(angle * 512 + 256, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, drawX, y, drawZ, decor.bitset);
+                            decor.entity.draw(angle * 512 + 256, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, drawX, y, drawZ, decor.bitset);
                         }
 
                         if ((decor.type & 0x200) !== 0 && nearestZ <= nearestX) {
                             const drawX: number = x + World3D.WALL_DECORATION_OUTSET_X[angle];
                             const drawZ: number = z + World3D.WALL_DECORATION_OUTSET_Z[angle];
-                            decor.model.draw((angle * 512 + 1280) & 0x7ff, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, drawX, y, drawZ, decor.bitset);
+                            decor.entity.draw((angle * 512 + 1280) & 0x7ff, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, drawX, y, drawZ, decor.bitset);
                         }
                     }
                 }
@@ -1893,11 +1834,11 @@ export default class World3D {
                 const wall: Wall | null = tile.wall;
                 if (wall) {
                     if ((wall.typeB & tile.backWallTypes) !== 0 && !this.wallVisible(occludeLevel, tileX, tileZ, wall.typeB)) {
-                        wall.modelB?.draw(0, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, wall.x - World3D.eyeX, wall.y - World3D.eyeY, wall.z - World3D.eyeZ, wall.bitset);
+                        wall.entityB?.draw(0, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, wall.x - World3D.eyeX, wall.y - World3D.eyeY, wall.z - World3D.eyeZ, wall.bitset);
                     }
 
                     if ((wall.typeA & tile.backWallTypes) !== 0 && !this.wallVisible(occludeLevel, tileX, tileZ, wall.typeA)) {
-                        wall.modelA?.draw(0, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, wall.x - World3D.eyeX, wall.y - World3D.eyeY, wall.z - World3D.eyeZ, wall.bitset);
+                        wall.entityA?.draw(0, World3D.sinEyePitch, World3D.cosEyePitch, World3D.sinEyeYaw, World3D.cosEyeYaw, wall.x - World3D.eyeX, wall.y - World3D.eyeY, wall.z - World3D.eyeZ, wall.bitset);
                     }
                 }
             }

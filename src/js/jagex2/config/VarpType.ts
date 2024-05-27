@@ -14,6 +14,9 @@ export default class VarpType extends ConfigType {
         for (let i: number = 0; i < this.count; i++) {
             this.instances[i] = new VarpType(i).decodeType(dat);
         }
+        if (dat.pos != dat.data.length) {
+            console.log('varptype load mismatch');
+        }
     };
 
     // ----
@@ -25,7 +28,7 @@ export default class VarpType extends ConfigType {
     clientcode: number = 0;
     code7: number = 0;
     transmit: boolean = false;
-    code8: boolean = false;
+    code12: number = 0;
 
     decode(code: number, dat: Packet): void {
         if (code === 1) {
@@ -43,10 +46,10 @@ export default class VarpType extends ConfigType {
             this.transmit = true;
         } else if (code === 7) {
             this.code7 = dat.g4;
-        } else if (code === 8) {
-            this.code8 = true;
         } else if (code === 10) {
             this.debugname = dat.gjstr;
+        } else if (code === 12) {
+            this.code12 = dat.g4;
         } else {
             console.log('Error unrecognised config code: ', code);
         }

@@ -1,5 +1,6 @@
 import SoundEnvelope from './SoundEnvelope';
 import Packet from '../io/Packet';
+import SoundFilter from './SoundFilter';
 
 export default class SoundTone {
     static buffer: Int32Array | null = null;
@@ -29,6 +30,9 @@ export default class SoundTone {
     length: number = 500;
     reverbVolume: number = 100;
     reverbDelay: number = 0;
+
+    filter: SoundFilter | null = null;
+    filterRange: SoundEnvelope | null = null;
 
     static init = (): void => {
         this.noise = new Int32Array(32768);
@@ -164,6 +168,93 @@ export default class SoundTone {
             }
         }
 
+        if (this.filter && this.filterRange) {
+            if (this.filter.pairs[0] > 0 || this.filter.pairs[1] > 0) {
+                this.filterRange.reset();
+
+                let range: number = this.filterRange.evaluate(sampleCount + 1);
+                let forward: number = this.filter.evaluate(0, range / 65536);
+                let backward: number = this.filter.evaluate(1, range / 65536);
+
+                if (sampleCount >= forward + backward) {
+                    let index: number = 0;
+                    let interval: number = backward;
+
+                    if (interval > sampleCount - forward) {
+                        interval = sampleCount - forward;
+                    }
+
+                    for (; index < interval; index++) {
+                        if (SoundTone.buffer) {
+                            let sample: number = (SoundTone.buffer[index + forward] * SoundFilter.unity16) >> 16;
+
+                            for (let offset: number = 0; offset < forward; offset++) {
+                                sample += (SoundTone.buffer[index + forward - 1 - offset] * SoundFilter.coefficient16[0][offset]) >> 16;
+                            }
+
+                            for (let offset: number = 0; offset < index; offset++) {
+                                sample -= (SoundTone.buffer[index - 1 - offset] * SoundFilter.coefficient16[1][offset]) >> 16;
+                            }
+
+                            SoundTone.buffer[index] = sample;
+                            range = this.filterRange.evaluate(sampleCount + 1);
+                        }
+                    }
+
+                    interval = 128;
+
+                    do {
+                        if (interval > sampleCount - forward) {
+                            interval = sampleCount - forward;
+                        }
+
+                        for (; index < interval; index++) {
+                            if (SoundTone.buffer) {
+                                let sample: number = (SoundTone.buffer[index + forward] * SoundFilter.unity16) >> 16;
+
+                                for (let offset: number = 0; offset < forward; offset++) {
+                                    sample += (SoundTone.buffer[index + forward - 1 - offset] * SoundFilter.coefficient16[0][offset]) >> 16;
+                                }
+
+                                for (let offset: number = 0; offset < backward; offset++) {
+                                    sample -= (SoundTone.buffer[index - 1 - offset] * SoundFilter.coefficient16[1][offset]) >> 16;
+                                }
+
+                                SoundTone.buffer[index] = sample;
+                                range = this.filterRange.evaluate(sampleCount + 1);
+                            }
+                        }
+
+                        if (index >= sampleCount - forward) {
+                            break;
+                        }
+
+                        forward = this.filter.evaluate(0, range / 65536);
+                        backward = this.filter.evaluate(1, range / 65536);
+                        interval += 128;
+                        // eslint-disable-next-line no-constant-condition
+                    } while (true);
+
+                    for (; index < sampleCount; index++) {
+                        if (SoundTone.buffer) {
+                            let sample: number = 0;
+
+                            for (let offset: number = index + forward - sampleCount; offset < forward; offset++) {
+                                sample += (SoundTone.buffer[index + forward - 1 - offset] * SoundFilter.coefficient16[0][offset]) >> 16;
+                            }
+
+                            for (let offset: number = 0; offset < backward; offset++) {
+                                sample -= (SoundTone.buffer[index - 1 - offset] * SoundFilter.coefficient16[1][offset]) >> 16;
+                            }
+
+                            SoundTone.buffer[index] = sample;
+                            this.filterRange.evaluate(sampleCount + 1);
+                        }
+                    }
+                }
+            }
+        }
+
         for (let sample: number = 0; sample < sampleCount; sample++) {
             if (SoundTone.buffer![sample] < -32768) {
                 SoundTone.buffer![sample] = -32768;
@@ -243,5 +334,8 @@ export default class SoundTone {
         this.reverbVolume = dat.gsmarts;
         this.length = dat.g2;
         this.start = dat.g2;
+        this.filter = new SoundFilter();
+        this.filterRange = new SoundEnvelope();
+        this.filter.read(dat, this.filterRange);
     }
 }

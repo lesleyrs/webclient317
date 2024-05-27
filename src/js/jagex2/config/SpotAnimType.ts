@@ -4,6 +4,7 @@ import Packet from '../io/Packet';
 import SeqType from './SeqType';
 import Model from '../graphics/Model';
 import LruCache from '../datastruct/LruCache';
+import {Client} from '../../client';
 
 export default class SpotAnimType extends ConfigType {
     static count: number = 0;
@@ -23,7 +24,6 @@ export default class SpotAnimType extends ConfigType {
     model: number = 0;
     anim: number = -1;
     seq: SeqType | null = null;
-    disposeAlpha: boolean = false;
     recol_s: Uint16Array = new Uint16Array(6);
     recol_d: Uint16Array = new Uint16Array(6);
     resizeh: number = 128;
@@ -41,8 +41,6 @@ export default class SpotAnimType extends ConfigType {
             if (SeqType.instances) {
                 this.seq = SeqType.instances[this.anim];
             }
-        } else if (code === 3) {
-            this.disposeAlpha = true;
         } else if (code === 4) {
             this.resizeh = dat.g2;
         } else if (code === 5) {
@@ -67,7 +65,8 @@ export default class SpotAnimType extends ConfigType {
         if (model) {
             return model;
         }
-        model = Model.model(this.model);
+        const data: Uint8Array | Jagfile | null = Client.jagStore[1].read(this.model);
+        model = Model.model(data as Uint8Array, this.model);
         for (let i: number = 0; i < 6; i++) {
             if (this.recol_s[0] !== 0) {
                 model.recolor(this.recol_s[i], this.recol_d[i]);

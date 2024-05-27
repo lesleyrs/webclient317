@@ -27,11 +27,11 @@ export default class SpotAnimEntity extends Entity {
     }
 
     update(delta: number): void {
-        if (!this.type.seq || !this.type.seq.delay) {
+        if (!this.type.seq) {
             return;
         }
-        for (this.seqCycle += delta; this.seqCycle > this.type.seq.delay[this.seqFrame]; ) {
-            this.seqCycle -= this.type.seq.delay[this.seqFrame] + 1;
+        for (this.seqCycle += delta; this.seqCycle > this.type.seq.getFrameDuration(this.seqFrame); ) {
+            this.seqCycle -= this.type.seq.getFrameDuration(this.seqFrame) + 1;
             this.seqFrame++;
 
             if (this.seqFrame >= this.type.seq.frameCount) {
@@ -41,9 +41,15 @@ export default class SpotAnimEntity extends Entity {
         }
     }
 
-    draw(): Model {
+    getModel(): Model | null {
         const tmp: Model = this.type.getModel();
-        const model: Model = Model.modelShareColored(tmp, true, !this.type.disposeAlpha, false);
+
+        const frame: number = -1;
+        if (this.type.seq && this.type.seq.frames) {
+            this.type.seq.frames[this.seqFrame];
+        }
+
+        const model: Model = Model.modelShareColored(tmp, true, frame === -1, false);
         if (!this.seqComplete && this.type.seq && this.type.seq.frames) {
             model.createLabelReferences();
             model.applyTransform(this.type.seq.frames[this.seqFrame]);

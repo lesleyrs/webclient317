@@ -93,8 +93,20 @@ export default class FloType extends ConfigType {
             this.occlude = false;
         } else if (code === 6) {
             this.debugname = dat.gjstr;
+        } else if (code == 7) {
+            const hue: number = this.hue;
+            const saturation: number = this.saturation;
+            const lightness: number = this.lightness;
+            const chroma: number = this.chroma;
+            const rgb: number = dat.g3;
+            this.setColor(rgb);
+            this.hue = hue;
+            this.saturation = saturation;
+            this.lightness = lightness;
+            this.chroma = chroma;
+            this.luminance = chroma;
         } else {
-            console.log('Error unrecognised config code: ', code);
+            console.log('Error unrecognised flo config code: ', code);
         }
     }
 

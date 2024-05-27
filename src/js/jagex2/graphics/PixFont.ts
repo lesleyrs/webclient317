@@ -32,17 +32,18 @@ export default class PixFont extends Hashable {
     }
 
     private readonly charMask: Int8Array[] = [];
-    readonly charMaskWidth: Int32Array = new Int32Array(94);
-    readonly charMaskHeight: Int32Array = new Int32Array(94);
-    readonly charOffsetX: Int32Array = new Int32Array(94);
-    readonly charOffsetY: Int32Array = new Int32Array(94);
-    readonly charAdvance: Int32Array = new Int32Array(95);
+    readonly charMaskWidth: Int32Array = new Int32Array(256);
+    readonly charMaskHeight: Int32Array = new Int32Array(256);
+    readonly charOffsetX: Int32Array = new Int32Array(256);
+    readonly charOffsetY: Int32Array = new Int32Array(256);
+    readonly charAdvance: Int32Array = new Int32Array(256);
     readonly drawWidth: Int32Array = new Int32Array(256);
     private readonly random: JavaRandom = new JavaRandom(BigInt(Date.now()));
 
     height: number = 0;
+    strikethrough: boolean = false; // TODO
 
-    static fromArchive = (archive: Jagfile, name: string): PixFont => {
+    static fromArchive = (archive: Jagfile, name: string, quill: boolean): PixFont => {
         const dat: Packet = new Packet(archive.read(name + '.dat'));
         const idx: Packet = new Packet(archive.read('index.dat'));
 
@@ -56,7 +57,7 @@ export default class PixFont extends Hashable {
 
         const font: PixFont = new PixFont();
 
-        for (let i: number = 0; i < 94; i++) {
+        for (let i: number = 0; i < 256; i++) {
             font.charOffsetX[i] = idx.g1;
             font.charOffsetY[i] = idx.g1;
 
@@ -80,7 +81,7 @@ export default class PixFont extends Hashable {
                 }
             }
 
-            if (h > font.height) {
+            if (h > font.height && i < 128) {
                 font.height = h;
             }
 
@@ -109,11 +110,8 @@ export default class PixFont extends Hashable {
                     font.charAdvance[i]--;
                 }
             }
-        }
 
-        font.charAdvance[94] = font.charAdvance[8];
-        for (let i: number = 0; i < 256; i++) {
-            font.drawWidth[i] = font.charAdvance[PixFont.CHARCODESET[i]];
+            font.charAdvance[' '.charCodeAt(0)] = quill ? font.charAdvance['I'.charCodeAt(0)] : font.charAdvance['i'.charCodeAt(0)];
         }
 
         return font;
@@ -130,9 +128,9 @@ export default class PixFont extends Hashable {
         const length: number = str.length;
         y -= this.height;
         for (let i: number = 0; i < length; i++) {
-            const c: number = PixFont.CHARCODESET[str.charCodeAt(i)];
+            const c: number = str.charCodeAt(i);
 
-            if (c !== 94) {
+            if (c !== 32) {
                 this.drawChar(this.charMask[c], x + this.charOffsetX[c], y + this.charOffsetY[c], this.charMaskWidth[c], this.charMaskHeight[c], color);
             }
 
@@ -151,9 +149,9 @@ export default class PixFont extends Hashable {
                 color = this.evaluateTag(str.substring(i + 1, i + 4));
                 i += 4;
             } else {
-                const c: number = PixFont.CHARCODESET[str.charCodeAt(i)];
+                const c: number = str.charCodeAt(i);
 
-                if (c !== 94) {
+                if (c !== 32) {
                     if (shadowed) {
                         this.drawChar(this.charMask[c], x + this.charOffsetX[c] + 1, y + this.charOffsetY[c] + 1, this.charMaskWidth[c], this.charMaskHeight[c], Colors.BLACK);
                     }
@@ -165,6 +163,7 @@ export default class PixFont extends Hashable {
         }
     }
 
+    // TODO: call this stringWidthTaggable and replace all func calls
     stringWidth(str: string | null): number {
         if (!str) {
             return 0;
@@ -176,12 +175,26 @@ export default class PixFont extends Hashable {
             if (str.charAt(i) === '@' && i + 4 < length && str.charAt(i + 4) === '@') {
                 i += 4;
             } else {
-                w += this.drawWidth[str.charCodeAt(i)];
+                w += this.charAdvance[str.charCodeAt(i)];
             }
         }
 
         return w;
     }
+
+    // stringWidth(str: string | null): number {
+    //     if (!str) {
+    //         return 0;
+    //     }
+
+    //     const length: number = str.length;
+    //     let w: number = 0;
+    //     for (let i: number = 0; i < length; i++) {
+    //         w += this.charAdvance[str.charCodeAt(i)];
+    //     }
+
+    //     return w;
+    // }
 
     drawStringTaggableCenter(x: number, y: number, str: string, color: number, shadowed: boolean): void {
         x |= 0;
@@ -214,8 +227,8 @@ export default class PixFont extends Hashable {
                 color = this.evaluateTag(str.substring(i + 1, i + 4));
                 i += 4;
             } else {
-                const c: number = PixFont.CHARCODESET[str.charCodeAt(i)];
-                if (c !== 94) {
+                const c: number = str.charCodeAt(i);
+                if (c !== 32) {
                     if (shadowed) {
                         this.drawCharAlpha(x + this.charOffsetX[c] + 1, offY + this.charOffsetY[c] + 1, this.charMaskWidth[c], this.charMaskHeight[c], Colors.BLACK, 192, this.charMask[c]);
                     }
@@ -253,10 +266,67 @@ export default class PixFont extends Hashable {
         const offY: number = y - this.height;
 
         for (let i: number = 0; i < str.length; i++) {
-            const c: number = PixFont.CHARCODESET[str.charCodeAt(i)];
+            const c: number = str.charCodeAt(i);
 
-            if (c != 94) {
+            if (c != 32) {
                 this.drawChar(this.charMask[c], x + this.charOffsetX[c], offY + this.charOffsetY[c] + ((Math.sin(i / 2.0 + phase / 5.0) * 5.0) | 0), this.charMaskWidth[c], this.charMaskHeight[c], color);
+            }
+
+            x += this.charAdvance[c];
+        }
+    }
+
+    drawCenteredWave2(x: number, y: number, str: string | null, color: number, phase: number): void {
+        if (!str) {
+            return;
+        }
+
+        x |= 0;
+        y |= 0;
+
+        x -= (this.stringWidth(str) / 2) | 0;
+        const offY: number = y - this.height;
+
+        for (let i: number = 0; i < str.length; i++) {
+            const c: number = str.charCodeAt(i);
+
+            if (c != 32) {
+                this.drawChar(
+                    this.charMask[c],
+                    x + this.charOffsetX[c] + ((Math.sin(i / 2.0 + phase / 5.0) * 5.0) | 0),
+                    offY + this.charOffsetY[c] + ((Math.sin(i / 3.0 + phase / 5.0) * 5.0) | 0),
+                    this.charMaskWidth[c],
+                    this.charMaskHeight[c],
+                    color
+                );
+            }
+
+            x += this.charAdvance[c];
+        }
+    }
+
+    drawCenteredShake(x: number, y: number, str: string | null, color: number, phase: number, phase2: number): void {
+        if (!str) {
+            return;
+        }
+
+        let amplitude: number = 7.0 - phase2 / 8.0;
+
+        if (amplitude < 0) {
+            amplitude = 0;
+        }
+
+        x |= 0;
+        y |= 0;
+
+        x -= (this.stringWidth(str) / 2) | 0;
+        const offY: number = y - this.height;
+
+        for (let i: number = 0; i < str.length; i++) {
+            const c: number = str.charCodeAt(i);
+
+            if (c != 32) {
+                this.drawChar(this.charMask[c], x + this.charOffsetX[c], offY + this.charOffsetY[c] + Math.sin(i / 1.5 + phase) * amplitude, this.charMaskWidth[c], this.charMaskHeight[c], color);
             }
 
             x += this.charAdvance[c];
@@ -459,6 +529,12 @@ export default class PixFont extends Hashable {
             return Colors.GREEN2;
         } else if (tag === 'gr3') {
             return Colors.GREEN3;
+        } else if (tag === 'str') {
+            this.strikethrough = true;
+            return -1;
+        } else if (tag === 'end') {
+            this.strikethrough = false;
+            return -1;
         } else {
             return Colors.BLACK;
         }

@@ -4,11 +4,11 @@ import Packet from '../io/Packet';
 import {TypedArray1d} from '../util/Arrays';
 
 export default class Wave {
-    static readonly delays: Int32Array = new Int32Array(1000);
+    static readonly delays: Int32Array = new Int32Array(5000);
     static waveBytes: Uint8Array | null = null;
     static waveBuffer: Packet | null = null;
 
-    private static readonly tracks: (Wave | null)[] = new TypedArray1d(1000, null);
+    private static readonly tracks: (Wave | null)[] = new TypedArray1d(5000, null);
     private readonly tones: (SoundTone | null)[] = new TypedArray1d(10, null);
 
     private loopBegin: number = 0;

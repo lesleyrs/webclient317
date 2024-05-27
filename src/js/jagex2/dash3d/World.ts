@@ -3,16 +3,17 @@ import FloType from '../config/FloType';
 import Packet from '../io/Packet';
 import Draw3D from '../graphics/Draw3D';
 import World3D from './World3D';
-import LinkList from '../datastruct/LinkList';
 import LocType from '../config/LocType';
 import Model from '../graphics/Model';
 import LocEntity from './entity/LocEntity';
-import SeqType from '../config/SeqType';
 import LocShape from './LocShape';
 import LocAngle from './LocAngle';
 import Colors from '../graphics/Colors';
 import TileOverlayShape from './type/TileOverlayShape';
 import {Int32Array2d, Int32Array3d, Uint8Array3d} from '../util/Arrays';
+import {Client} from '../../client';
+import CollisionFlag from './CollisionFlag';
+import Entity from './entity/Entity';
 
 // noinspection JSSuspiciousNameCombination,DuplicatedCode
 export default class World {
@@ -27,6 +28,7 @@ export default class World {
     static lowMemory: boolean = true;
     static levelBuilt: number = 0;
     static fullbright: boolean = false;
+    static minLevel: number = 99;
 
     static perlin = (x: number, z: number): number => {
         let value: number = this.perlinScale(x + 45365, z + 91923, 4) + ((this.perlinScale(x + 10294, z + 37821, 2) - 128) >> 1) + ((this.perlinScale(x, z, 1) - 128) >> 2) - 128;
@@ -71,11 +73,11 @@ export default class World {
         return Number(((n1 * (n1 * n1 * 15731n + 789221n) + 1376312589n) & 0x7fffffffn) >> 19n) & 0xff;
     };
 
-    static addLoc = (level: number, x: number, z: number, scene: World3D | null, levelHeightmap: Int32Array[][], locs: LinkList, collision: CollisionMap | null, locId: number, shape: number, angle: number, trueLevel: number): void => {
-        const heightSW: number = levelHeightmap[trueLevel][x][z];
-        const heightSE: number = levelHeightmap[trueLevel][x + 1][z];
-        const heightNW: number = levelHeightmap[trueLevel][x + 1][z + 1];
-        const heightNE: number = levelHeightmap[trueLevel][x][z + 1];
+    static addLoc = (level: number, x: number, z: number, scene: World3D | null, levelHeightmap: Int32Array[][], collision: CollisionMap | null, locId: number, shape: number, angle: number, trueLevel: number): void => {
+        let heightSW: number = levelHeightmap[trueLevel][x][z];
+        let heightSE: number = levelHeightmap[trueLevel][x + 1][z];
+        let heightNW: number = levelHeightmap[trueLevel][x][z + 1];
+        let heightNE: number = levelHeightmap[trueLevel][x + 1][z + 1];
         const y: number = (heightSW + heightSE + heightNW + heightNE) >> 2;
 
         const loc: LocType = LocType.get(locId);
@@ -89,18 +91,28 @@ export default class World {
         const info: number = ((((angle << 6) + shape) | 0) << 24) >> 24;
 
         if (shape === LocShape.GROUND_DECOR.id) {
-            scene?.addGroundDecoration(loc.getModel(LocShape.GROUND_DECOR.id, angle, heightSW, heightSE, heightNW, heightNE, -1), level, x, z, y, bitset, info);
+            let entity: Entity | null;
+
+            if (loc.anim === -1 && !loc.multiloc) {
+                entity = loc.getModel(LocShape.GROUND_DECOR.id, angle, heightSW, heightSE, heightNE, heightNW, -1);
+            } else {
+                entity = new LocEntity(locId, angle, LocShape.GROUND_DECOR.id, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+            }
+
+            scene?.addGroundDecoration(entity, level, x, z, y, bitset, info);
 
             if (loc.blockwalk && loc.active) {
                 collision?.addFloor(x, z);
             }
-
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 3, x, z, SeqType.instances[loc.anim], true));
-            }
         } else if (shape === LocShape.CENTREPIECE_STRAIGHT.id || shape === LocShape.CENTREPIECE_DIAGONAL.id) {
-            const model: Model | null = loc.getModel(LocShape.CENTREPIECE_STRAIGHT.id, angle, heightSW, heightSE, heightNW, heightNE, -1);
-            if (model) {
+            let entity: Entity | null;
+            if (loc.anim === -1 && !loc.multiloc) {
+                entity = loc.getModel(LocShape.CENTREPIECE_STRAIGHT.id, angle, heightSW, heightSE, heightNE, heightNW, -1);
+            } else {
+                entity = new LocEntity(locId, LocShape.CENTREPIECE_STRAIGHT.id, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+            }
+
+            if (entity) {
                 let yaw: number = 0;
                 if (shape === LocShape.CENTREPIECE_DIAGONAL.id) {
                     yaw += 256;
@@ -116,140 +128,340 @@ export default class World {
                     height = loc.length;
                 }
 
-                scene?.addLoc(level, x, z, y, model, null, bitset, info, width, height, yaw);
+                scene?.addLoc(level, x, z, y, entity, bitset, info, width, height, yaw);
             }
 
             if (loc.blockwalk) {
                 collision?.addLoc(x, z, loc.width, loc.length, angle, loc.blockrange);
-            }
-
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 2, x, z, SeqType.instances[loc.anim], true));
             }
         } else if (shape >= LocShape.ROOF_STRAIGHT.id) {
-            scene?.addLoc(level, x, z, y, loc.getModel(shape, angle, heightSW, heightSE, heightNW, heightNE, -1), null, bitset, info, 1, 1, 0);
+            let entity: Entity | null;
+
+            if (loc.anim === -1 && !loc.multiloc) {
+                entity = loc.getModel(LocShape.ROOF_STRAIGHT.id, angle, heightSW, heightSE, heightNE, heightNW, -1);
+            } else {
+                entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+            }
+
+            scene?.addLoc(level, x, z, y, entity, bitset, info, 1, 1, 0);
 
             if (loc.blockwalk) {
                 collision?.addLoc(x, z, loc.width, loc.length, angle, loc.blockrange);
             }
-
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 2, x, z, SeqType.instances[loc.anim], true));
-            }
         } else if (shape === LocShape.WALL_STRAIGHT.id) {
-            scene?.addWall(level, x, z, y, World.ROTATION_WALL_TYPE[angle], 0, loc.getModel(LocShape.WALL_STRAIGHT.id, angle, heightSW, heightSE, heightNW, heightNE, -1), null, bitset, info);
+            let entity: Entity | null;
+
+            if (loc.anim === -1 && !loc.multiloc) {
+                entity = loc.getModel(LocShape.WALL_STRAIGHT.id, angle, heightSW, heightSE, heightNE, heightNW, -1);
+            } else {
+                entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+            }
+
+            scene?.addWall(level, x, z, y, World.ROTATION_WALL_TYPE[angle], 0, entity, null, bitset, info);
 
             if (loc.blockwalk) {
                 collision?.addWall(x, z, shape, angle, loc.blockrange);
-            }
-
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 0, x, z, SeqType.instances[loc.anim], true));
             }
         } else if (shape === LocShape.WALL_DIAGONAL_CORNER.id) {
-            scene?.addWall(level, x, z, y, World.ROTATION_WALL_CORNER_TYPE[angle], 0, loc.getModel(LocShape.WALL_DIAGONAL_CORNER.id, angle, heightSW, heightSE, heightNW, heightNE, -1), null, bitset, info);
+            let entity: Entity | null;
+
+            if (loc.anim === -1 && !loc.multiloc) {
+                entity = loc.getModel(LocShape.WALL_DIAGONAL_CORNER.id, angle, heightSW, heightSE, heightNE, heightNW, -1);
+            } else {
+                entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+            }
+
+            scene?.addWall(level, x, z, y, World.ROTATION_WALL_CORNER_TYPE[angle], 0, entity, null, bitset, info);
 
             if (loc.blockwalk) {
                 collision?.addWall(x, z, shape, angle, loc.blockrange);
-            }
-
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 0, x, z, SeqType.instances[loc.anim], true));
             }
         } else if (shape === LocShape.WALL_L.id) {
             const offset: number = (angle + 1) & 0x3;
+            let locA: Entity | null;
+            let locB: Entity | null;
 
-            scene?.addWall(
-                level,
-                x,
-                z,
-                y,
-                World.ROTATION_WALL_TYPE[angle],
-                World.ROTATION_WALL_TYPE[offset],
-                loc.getModel(LocShape.WALL_L.id, angle + 4, heightSW, heightSE, heightNW, heightNE, -1),
-                loc.getModel(LocShape.WALL_L.id, offset, heightSW, heightSE, heightNW, heightNE, -1),
-                bitset,
-                info
-            );
+            if (loc.anim === -1 && !loc.multiloc) {
+                locA = loc.getModel(LocShape.WALL_L.id, angle + 4, heightSW, heightSE, heightNE, heightNW, -1);
+                locB = loc.getModel(LocShape.WALL_L.id, offset, heightSW, heightSE, heightNE, heightNW, -1);
+            } else {
+                locA = new LocEntity(locId, shape, angle + 4, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                locB = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+            }
+
+            scene?.addWall(level, x, z, y, World.ROTATION_WALL_TYPE[angle], World.ROTATION_WALL_TYPE[offset], locA, locB, bitset, info);
 
             if (loc.blockwalk) {
                 collision?.addWall(x, z, shape, angle, loc.blockrange);
-            }
-
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 0, x, z, SeqType.instances[loc.anim], true));
             }
         } else if (shape === LocShape.WALL_SQUARE_CORNER.id) {
-            scene?.addWall(level, x, z, y, World.ROTATION_WALL_CORNER_TYPE[angle], 0, loc.getModel(LocShape.WALL_SQUARE_CORNER.id, angle, heightSW, heightSE, heightNW, heightNE, -1), null, bitset, info);
+            let entity: Entity | null;
+            if (loc.anim === -1 && !loc.multiloc) {
+                entity = loc.getModel(LocShape.WALL_SQUARE_CORNER.id, angle, heightSW, heightSE, heightNE, heightNW, -1);
+            } else {
+                entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+            }
+
+            scene?.addWall(level, x, z, y, World.ROTATION_WALL_CORNER_TYPE[angle], 0, entity, null, bitset, info);
 
             if (loc.blockwalk) {
                 collision?.addWall(x, z, shape, angle, loc.blockrange);
             }
-
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 0, x, z, SeqType.instances[loc.anim], true));
-            }
         } else if (shape === LocShape.WALL_DIAGONAL.id) {
-            scene?.addLoc(level, x, z, y, loc.getModel(shape, angle, heightSW, heightSE, heightNW, heightNE, -1), null, bitset, info, 1, 1, 0);
+            let entity: Entity | null;
+            if (loc.anim === -1 && !loc.multiloc) {
+                entity = loc.getModel(LocShape.WALL_DIAGONAL.id, angle, heightSW, heightSE, heightNE, heightNW, -1);
+            } else {
+                entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+            }
+
+            scene?.addLoc(level, x, z, y, entity, bitset, info, 1, 1, 0);
 
             if (loc.blockwalk) {
                 collision?.addLoc(x, z, loc.width, loc.length, angle, loc.blockrange);
             }
-
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 2, x, z, SeqType.instances[loc.anim], true));
-            }
-        } else if (shape === LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id) {
-            scene?.setWallDecoration(level, x, z, y, 0, 0, bitset, loc.getModel(LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id, LocAngle.WEST, heightSW, heightSE, heightNW, heightNE, -1), info, angle * 512, World.ROTATION_WALL_TYPE[angle]);
-
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 1, x, z, SeqType.instances[loc.anim], true));
-            }
-        } else if (shape === LocShape.WALLDECOR_STRAIGHT_OFFSET.id) {
-            let offset: number = 16;
-            if (scene) {
-                const width: number = scene.getWallBitset(level, x, z);
-                if (width > 0) {
-                    offset = LocType.get((width >> 14) & 0x7fff).wallwidth;
+        } else {
+            if (loc.hillskew) {
+                if (angle === 1) {
+                    const tmp: number = heightNW;
+                    heightNW = heightNE;
+                    heightNE = heightSE;
+                    heightSE = heightSW;
+                    heightSW = tmp;
+                } else if (angle === 2) {
+                    let tmp: number = heightNW;
+                    heightNW = heightSE;
+                    heightSE = tmp;
+                    tmp = heightNE;
+                    heightNE = heightSW;
+                    heightSW = tmp;
+                } else if (angle === 3) {
+                    const tmp: number = heightNW;
+                    heightNW = heightSW;
+                    heightSW = heightSE;
+                    heightSE = heightNE;
+                    heightNE = tmp;
                 }
             }
 
-            scene?.setWallDecoration(
-                level,
-                x,
-                z,
-                y,
-                World.WALL_DECORATION_ROTATION_FORWARD_X[angle] * offset,
-                World.WALL_DECORATION_ROTATION_FORWARD_Z[angle] * offset,
-                bitset,
-                loc.getModel(LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id, LocAngle.WEST, heightSW, heightSE, heightNW, heightNE, -1),
-                info,
-                angle * 512,
-                World.ROTATION_WALL_TYPE[angle]
-            );
+            if (shape === LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id) {
+                let entity: Entity | null;
+                if (loc.anim === -1 && !loc.multiloc) {
+                    entity = loc.getModel(LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id, LocAngle.WEST, heightSW, heightSE, heightNE, heightNW, -1);
+                } else {
+                    entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                }
 
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 1, x, z, SeqType.instances[loc.anim], true));
-            }
-        } else if (shape === LocShape.WALLDECOR_DIAGONAL_OFFSET.id) {
-            scene?.setWallDecoration(level, x, z, y, 0, 0, bitset, loc.getModel(LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id, LocAngle.WEST, heightSW, heightSE, heightNW, heightNE, -1), info, angle, 256);
+                scene?.setWallDecoration(level, x, z, y, 0, 0, bitset, entity, info, angle * 512, World.ROTATION_WALL_TYPE[angle]);
+            } else if (shape === LocShape.WALLDECOR_STRAIGHT_OFFSET.id) {
+                let offset: number = 16;
+                if (scene) {
+                    const width: number = scene.getWallBitset(level, x, z);
+                    if (width > 0) {
+                        offset = LocType.get((width >> 14) & 0x7fff).wallwidth;
+                    }
+                }
 
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 1, x, z, SeqType.instances[loc.anim], true));
-            }
-        } else if (shape === LocShape.WALLDECOR_DIAGONAL_NOOFFSET.id) {
-            scene?.setWallDecoration(level, x, z, y, 0, 0, bitset, loc.getModel(LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id, LocAngle.WEST, heightSW, heightSE, heightNW, heightNE, -1), info, angle, 512);
+                let entity: Entity | null;
+                if (loc.anim === -1 && !loc.multiloc) {
+                    entity = loc.getModel(LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id, LocAngle.WEST, heightSW, heightSE, heightNE, heightNW, -1);
+                } else {
+                    entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                }
 
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 1, x, z, SeqType.instances[loc.anim], true));
-            }
-        } else if (shape === LocShape.WALLDECOR_DIAGONAL_BOTH.id) {
-            scene?.setWallDecoration(level, x, z, y, 0, 0, bitset, loc.getModel(LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id, LocAngle.WEST, heightSW, heightSE, heightNW, heightNE, -1), info, angle, 768);
+                scene?.setWallDecoration(level, x, z, y, World.WALL_DECORATION_ROTATION_FORWARD_X[angle] * offset, World.WALL_DECORATION_ROTATION_FORWARD_Z[angle] * offset, bitset, entity, info, angle * 512, World.ROTATION_WALL_TYPE[angle]);
+            } else if (shape === LocShape.WALLDECOR_DIAGONAL_OFFSET.id) {
+                let entity: Entity | null;
+                if (loc.anim === -1 && !loc.multiloc) {
+                    entity = loc.getModel(LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id, LocAngle.WEST, heightSW, heightSE, heightNE, heightNW, -1);
+                } else {
+                    entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                }
 
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 1, x, z, SeqType.instances[loc.anim], true));
+                scene?.setWallDecoration(level, x, z, y, 0, 0, bitset, entity, info, angle, 256);
+            } else if (shape === LocShape.WALLDECOR_DIAGONAL_NOOFFSET.id) {
+                let entity: Entity | null;
+                if (loc.anim === -1 && !loc.multiloc) {
+                    entity = loc.getModel(LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id, LocAngle.WEST, heightSW, heightSE, heightNE, heightNW, -1);
+                } else {
+                    entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                }
+
+                scene?.setWallDecoration(level, x, z, y, 0, 0, bitset, entity, info, angle, 512);
+            } else if (shape === LocShape.WALLDECOR_DIAGONAL_BOTH.id) {
+                let entity: Entity | null;
+                if (loc.anim === -1 && !loc.multiloc) {
+                    entity = loc.getModel(LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id, LocAngle.WEST, heightSW, heightSE, heightNE, heightNW, -1);
+                } else {
+                    entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                }
+
+                scene?.setWallDecoration(level, x, z, y, 0, 0, bitset, entity, info, angle, 768);
             }
         }
+    };
+
+    public readTiles = (data: Int8Array, offsetZ: number, offsetX: number, originX: number, originZ: number, collisionMaps: (CollisionMap | null)[]): void => {
+        for (let level: number = 0; level < 4; level++) {
+            for (let x: number = 0; x < 64; x++) {
+                for (let z: number = 0; z < 64; z++) {
+                    if (offsetX + x > 0 && offsetX + x < CollisionMap.SIZE - 1 && offsetZ + z > 0 && offsetZ + z < CollisionMap.SIZE - 1) {
+                        if (collisionMaps) {
+                            collisionMaps[level]!.flags[CollisionMap.index(offsetX + x, offsetZ + z)] &= ~CollisionFlag.FLAG_UNINITIALIZED;
+                        }
+                    }
+                }
+            }
+        }
+
+        const buf: Packet = new Packet(data);
+        for (let level: number = 0; level < 4; level++) {
+            for (let x: number = 0; x < 64; x++) {
+                for (let z: number = 0; z < 64; z++) {
+                    this.readTiles2(buf, originX, originZ, level, x + offsetX, z + offsetZ, 0);
+                }
+            }
+        }
+    };
+
+    private readTiles2 = (buf: Packet, originX: number, originZ: number, level: number, x: number, z: number, mapRotation: number): void => {
+        if (x >= 0 && x < CollisionMap.SIZE && z >= 0 && z < CollisionMap.SIZE) {
+            this.levelTileFlags[level][x][z] = 0;
+
+            for (;;) {
+                const type: number = buf.g1;
+
+                if (type === 0) {
+                    if (level === 0) {
+                        this.levelHeightmap[0][x][z] = -World.perlin(932731 + x + originX, 556238 + z + originZ) * 8;
+                    } else {
+                        this.levelHeightmap[level][x][z] = this.levelHeightmap[level - 1][x][z] - 240;
+                        break;
+                    }
+                    break;
+                }
+
+                if (type === 1) {
+                    let height: number = buf.g1;
+
+                    if (height === 1) {
+                        height = 0;
+                    }
+
+                    if (level === 0) {
+                        this.levelHeightmap[0][x][z] = -height * 8;
+                    } else {
+                        this.levelHeightmap[level][x][z] = this.levelHeightmap[level - 1][x][z] - height * 8;
+                        break;
+                    }
+                    break;
+                }
+
+                if (type <= 49) {
+                    this.levelTileOverlayIds[level][x][z] = buf.g1b;
+                    this.levelTileOverlayShape[level][x][z] = (type - 2) / 4;
+                    this.levelTileOverlayRotation[level][x][z] = (type - 2 + mapRotation) & 0x3;
+                } else if (type <= 81) {
+                    this.levelTileFlags[level][x][z] = type - 49;
+                } else {
+                    this.levelTileUnderlayIds[level][x][z] = type - 81;
+                }
+            }
+        } else {
+            for (;;) {
+                const type: number = buf.g1;
+                if (type === 0) {
+                    break;
+                }
+                if (type === 1) {
+                    buf.g1;
+                    break;
+                }
+                if (type <= 49) {
+                    buf.g1;
+                }
+            }
+        }
+    };
+
+    public stitchHeightmap = (tileX: number, tileZ: number, tileSizeX: number, tileSizeZ: number): void => {
+        for (let z: number = tileZ; z <= tileZ + tileSizeZ; z++) {
+            for (let x: number = tileX; x <= tileX + tileSizeX; x++) {
+                if (x < 0 || x >= this.maxTileX || z < 0 || z >= this.maxTileZ) {
+                    continue;
+                }
+
+                this.levelShademap[0][x][z] = 127;
+
+                if (x === tileX && x > 0) {
+                    this.levelHeightmap[0][x][z] = this.levelHeightmap[0][x - 1][z];
+                }
+
+                if (x === tileX + tileSizeX && x < this.maxTileX - 1) {
+                    this.levelHeightmap[0][x][z] = this.levelHeightmap[0][x + 1][z];
+                }
+
+                if (z === tileZ && z > 0) {
+                    this.levelHeightmap[0][x][z] = this.levelHeightmap[0][x][z - 1];
+                }
+
+                if (z === tileZ + tileSizeZ && z < this.maxTileZ - 1) {
+                    this.levelHeightmap[0][x][z] = this.levelHeightmap[0][x][z + 1];
+                }
+            }
+        }
+    };
+
+    static validateLocs = (data: Int8Array, originX: number, originZ: number): number => {
+        const ok: number = 1;
+        const buf: Packet = new Packet(new Uint8Array(data));
+        let locID: number = -1;
+
+        for (;;) {
+            const deltaID: number = buf.gsmarts;
+            if (deltaID === 0) {
+                break;
+            }
+
+            locID += deltaID;
+
+            let pos: number = 0;
+            let skip: boolean = false;
+
+            for (;;) {
+                if (skip) {
+                    if (buf.gsmarts === 0) {
+                        break;
+                    }
+                    buf.g1;
+                } else {
+                    const deltaPos: number = buf.gsmarts;
+
+                    if (deltaPos === 0) {
+                        break;
+                    }
+
+                    pos += deltaPos - 1;
+
+                    const z: number = pos & 0x3f;
+                    const x: number = (pos >> 6) & 0x3f;
+
+                    const kind: number = buf.g1 >> 2;
+                    const localX: number = x + originX;
+                    const localZ: number = z + originZ;
+
+                    if (localX > 0 && localZ > 0 && localX < 103 && localZ < 103) {
+                        const type: LocType = LocType.get(locID);
+
+                        if (kind != 22 || !Client.lowMemory || type.active || type.forcedecor) {
+                            // ok &= type.validate();
+                            skip = true;
+                        }
+                    }
+                }
+            }
+        }
+        return ok;
     };
 
     private readonly maxTileX: number;
@@ -270,6 +482,7 @@ export default class World {
     private readonly levelOccludemap: Int32Array[][];
 
     public constructor(maxTileX: number, maxTileZ: number, levelHeightmap: Int32Array[][], levelTileFlags: Uint8Array[][]) {
+        World.minLevel = 99;
         this.maxTileX = maxTileX;
         this.maxTileZ = maxTileZ;
         this.levelHeightmap = levelHeightmap;
@@ -417,123 +630,129 @@ export default class World {
                             magnitudeAccumulator -= this.blendMagnitude[dz2];
                         }
 
-                        if (z0 >= 1 && z0 < this.maxTileZ - 1 && (!World.lowMemory || ((this.levelTileFlags[level][x0][z0] & 0x10) === 0 && this.getDrawLevel(level, x0, z0) === World.levelBuilt))) {
-                            const underlayId: number = this.levelTileUnderlayIds[level][x0][z0] & 0xff;
-                            const overlayId: number = this.levelTileOverlayIds[level][x0][z0] & 0xff;
+                        if (z0 < 1 || z0 >= this.maxTileZ - 1 || (World.lowMemory && (this.levelTileFlags[0][x0][z0] & 0x2) == 0 && (this.levelTileFlags[level][x0][z0] & 0x10) != 0) || this.getDrawLevel(level, x0, z0) !== World.levelBuilt) {
+                            continue;
+                        }
 
-                            if (underlayId > 0 || overlayId > 0) {
-                                const heightSW: number = this.levelHeightmap[level][x0][z0];
-                                const heightSE: number = this.levelHeightmap[level][x0 + 1][z0];
-                                const heightNE: number = this.levelHeightmap[level][x0 + 1][z0 + 1];
-                                const heightNW: number = this.levelHeightmap[level][x0][z0 + 1];
+                        if (level < World.minLevel) {
+                            World.minLevel = level;
+                        }
 
-                                const lightSW: number = this.levelLightmap[x0][z0];
-                                const lightSE: number = this.levelLightmap[x0 + 1][z0];
-                                const lightNE: number = this.levelLightmap[x0 + 1][z0 + 1];
-                                const lightNW: number = this.levelLightmap[x0][z0 + 1];
+                        const underlayId: number = this.levelTileUnderlayIds[level][x0][z0] & 0xff;
+                        const overlayId: number = this.levelTileOverlayIds[level][x0][z0] & 0xff;
 
-                                let baseColor: number = -1;
-                                let tintColor: number = -1;
+                        if (underlayId > 0 || overlayId > 0) {
+                            const heightSW: number = this.levelHeightmap[level][x0][z0];
+                            const heightSE: number = this.levelHeightmap[level][x0 + 1][z0];
+                            const heightNE: number = this.levelHeightmap[level][x0 + 1][z0 + 1];
+                            const heightNW: number = this.levelHeightmap[level][x0][z0 + 1];
 
-                                if (underlayId > 0) {
-                                    const hue: number = ((hueAccumulator * 256) / luminanceAccumulator) | 0;
-                                    const saturation: number = (saturationAccumulator / magnitudeAccumulator) | 0;
-                                    let lightness: number = (lightnessAccumulator / magnitudeAccumulator) | 0;
-                                    baseColor = FloType.hsl24to16(hue, saturation, lightness);
-                                    const randomHue: number = (hue + World.randomHueOffset) & 0xff;
-                                    lightness += World.randomLightnessOffset;
-                                    if (lightness < 0) {
-                                        lightness = 0;
-                                    } else if (lightness > 255) {
-                                        lightness = 255;
-                                    }
-                                    tintColor = FloType.hsl24to16(randomHue, saturation, lightness);
+                            const lightSW: number = this.levelLightmap[x0][z0];
+                            const lightSE: number = this.levelLightmap[x0 + 1][z0];
+                            const lightNE: number = this.levelLightmap[x0 + 1][z0 + 1];
+                            const lightNW: number = this.levelLightmap[x0][z0 + 1];
+
+                            let baseColor: number = -1;
+                            let tintColor: number = -1;
+
+                            if (underlayId > 0) {
+                                const hue: number = ((hueAccumulator * 256) / luminanceAccumulator) | 0;
+                                const saturation: number = (saturationAccumulator / magnitudeAccumulator) | 0;
+                                let lightness: number = (lightnessAccumulator / magnitudeAccumulator) | 0;
+                                baseColor = FloType.hsl24to16(hue, saturation, lightness);
+                                const randomHue: number = (hue + World.randomHueOffset) & 0xff;
+                                lightness += World.randomLightnessOffset;
+                                if (lightness < 0) {
+                                    lightness = 0;
+                                } else if (lightness > 255) {
+                                    lightness = 255;
+                                }
+                                tintColor = FloType.hsl24to16(randomHue, saturation, lightness);
+                            }
+
+                            if (level > 0) {
+                                let occludes: boolean = underlayId !== 0 || this.levelTileOverlayShape[level][x0][z0] === TileOverlayShape.PLAIN;
+
+                                if (overlayId > 0 && !FloType.instances[overlayId - 1].occlude) {
+                                    occludes = false;
                                 }
 
-                                if (level > 0) {
-                                    let occludes: boolean = underlayId !== 0 || this.levelTileOverlayShape[level][x0][z0] === TileOverlayShape.PLAIN;
-
-                                    if (overlayId > 0 && !FloType.instances[overlayId - 1].occlude) {
-                                        occludes = false;
-                                    }
-
-                                    // occludes && flat
-                                    if (occludes && heightSW === heightSE && heightSW === heightNE && heightSW === heightNW) {
-                                        this.levelOccludemap[level][x0][z0] |= 0x924;
-                                    }
+                                // occludes && flat
+                                if (occludes && heightSW === heightSE && heightSW === heightNE && heightSW === heightNW) {
+                                    this.levelOccludemap[level][x0][z0] |= 0x924;
                                 }
+                            }
 
-                                let shadeColor: number = 0;
-                                if (baseColor !== -1) {
-                                    shadeColor = Draw3D.palette[FloType.mulHSL(tintColor, 96)];
-                                }
+                            let shadeColor: number = 0;
+                            if (baseColor !== -1) {
+                                shadeColor = Draw3D.palette[FloType.mulHSL(tintColor, 96)];
+                            }
 
-                                if (overlayId === 0) {
-                                    scene?.setTile(
-                                        level,
-                                        x0,
-                                        z0,
-                                        TileOverlayShape.PLAIN,
-                                        LocAngle.WEST,
-                                        -1,
-                                        heightSW,
-                                        heightSE,
-                                        heightNE,
-                                        heightNW,
-                                        FloType.mulHSL(baseColor, lightSW),
-                                        FloType.mulHSL(baseColor, lightSE),
-                                        FloType.mulHSL(baseColor, lightNE),
-                                        FloType.mulHSL(baseColor, lightNW),
-                                        Colors.BLACK,
-                                        Colors.BLACK,
-                                        Colors.BLACK,
-                                        Colors.BLACK,
-                                        shadeColor,
-                                        Colors.BLACK
-                                    );
+                            if (overlayId === 0) {
+                                scene?.setTile(
+                                    level,
+                                    x0,
+                                    z0,
+                                    TileOverlayShape.PLAIN,
+                                    LocAngle.WEST,
+                                    -1,
+                                    heightSW,
+                                    heightSE,
+                                    heightNE,
+                                    heightNW,
+                                    FloType.mulHSL(baseColor, lightSW),
+                                    FloType.mulHSL(baseColor, lightSE),
+                                    FloType.mulHSL(baseColor, lightNE),
+                                    FloType.mulHSL(baseColor, lightNW),
+                                    Colors.BLACK,
+                                    Colors.BLACK,
+                                    Colors.BLACK,
+                                    Colors.BLACK,
+                                    shadeColor,
+                                    Colors.BLACK
+                                );
+                            } else {
+                                const shape: number = this.levelTileOverlayShape[level][x0][z0] + 1;
+                                const rotation: number = this.levelTileOverlayRotation[level][x0][z0];
+                                const flo: FloType = FloType.instances[overlayId - 1];
+                                let textureId: number = flo.texture;
+                                let hsl: number;
+                                let rgb: number;
+
+                                if (textureId >= 0) {
+                                    rgb = Draw3D.getAverageTextureRGB(textureId);
+                                    hsl = -1;
+                                } else if (flo.rgb === Colors.MAGENTA) {
+                                    rgb = 0;
+                                    hsl = -2;
+                                    textureId = -1;
                                 } else {
-                                    const shape: number = this.levelTileOverlayShape[level][x0][z0] + 1;
-                                    const rotation: number = this.levelTileOverlayRotation[level][x0][z0];
-                                    const flo: FloType = FloType.instances[overlayId - 1];
-                                    let textureId: number = flo.texture;
-                                    let hsl: number;
-                                    let rgb: number;
-
-                                    if (textureId >= 0) {
-                                        rgb = Draw3D.getAverageTextureRGB(textureId);
-                                        hsl = -1;
-                                    } else if (flo.rgb === Colors.MAGENTA) {
-                                        rgb = 0;
-                                        hsl = -2;
-                                        textureId = -1;
-                                    } else {
-                                        hsl = FloType.hsl24to16(flo.hue, flo.saturation, flo.lightness);
-                                        rgb = Draw3D.palette[FloType.adjustLightness(flo.hsl, 96)];
-                                    }
-
-                                    scene?.setTile(
-                                        level,
-                                        x0,
-                                        z0,
-                                        shape,
-                                        rotation,
-                                        textureId,
-                                        heightSW,
-                                        heightSE,
-                                        heightNE,
-                                        heightNW,
-                                        FloType.mulHSL(baseColor, lightSW),
-                                        FloType.mulHSL(baseColor, lightSE),
-                                        FloType.mulHSL(baseColor, lightNE),
-                                        FloType.mulHSL(baseColor, lightNW),
-                                        FloType.adjustLightness(hsl, lightSW),
-                                        FloType.adjustLightness(hsl, lightSE),
-                                        FloType.adjustLightness(hsl, lightNE),
-                                        FloType.adjustLightness(hsl, lightNW),
-                                        shadeColor,
-                                        rgb
-                                    );
+                                    hsl = FloType.hsl24to16(flo.hue, flo.saturation, flo.lightness);
+                                    rgb = Draw3D.palette[FloType.adjustLightness(flo.hsl, 96)];
                                 }
+
+                                scene?.setTile(
+                                    level,
+                                    x0,
+                                    z0,
+                                    shape,
+                                    rotation,
+                                    textureId,
+                                    heightSW,
+                                    heightSE,
+                                    heightNE,
+                                    heightNW,
+                                    FloType.mulHSL(baseColor, lightSW),
+                                    FloType.mulHSL(baseColor, lightSE),
+                                    FloType.mulHSL(baseColor, lightNE),
+                                    FloType.mulHSL(baseColor, lightNW),
+                                    FloType.adjustLightness(hsl, lightSW),
+                                    FloType.adjustLightness(hsl, lightSE),
+                                    FloType.adjustLightness(hsl, lightNE),
+                                    FloType.adjustLightness(hsl, lightNW),
+                                    shadeColor,
+                                    rgb
+                                );
                             }
                         }
                     }
@@ -719,100 +938,7 @@ export default class World {
         }
     };
 
-    clearLandscape = (startX: number, startZ: number, endX: number, endZ: number): void => {
-        let waterOverlay: number = 0;
-        for (let i: number = 0; i < FloType.count; i++) {
-            if (FloType.instances[i].debugname?.toLowerCase() === 'water') {
-                waterOverlay = ((i + 1) << 24) >> 24;
-                break;
-            }
-        }
-
-        for (let z: number = startX; z < startX + endX; z++) {
-            for (let x: number = startZ; x < startZ + endZ; x++) {
-                if (x >= 0 && x < this.maxTileX && z >= 0 && z < this.maxTileZ) {
-                    this.levelTileOverlayIds[0][x][z] = waterOverlay;
-
-                    for (let level: number = 0; level < CollisionMap.LEVELS; level++) {
-                        this.levelHeightmap[level][x][z] = 0;
-                        this.levelTileFlags[level][x][z] = 0;
-                    }
-                }
-            }
-        }
-    };
-
-    readLandscape = (originX: number, originZ: number, xOffset: number, zOffset: number, src: Int8Array): void => {
-        const buf: Packet = new Packet(new Uint8Array(src));
-
-        for (let level: number = 0; level < CollisionMap.LEVELS; level++) {
-            for (let x: number = 0; x < 64; x++) {
-                for (let z: number = 0; z < 64; z++) {
-                    const stx: number = x + xOffset;
-                    const stz: number = z + zOffset;
-                    let opcode: number;
-
-                    if (stx >= 0 && stx < CollisionMap.SIZE && stz >= 0 && stz < CollisionMap.SIZE) {
-                        this.levelTileFlags[level][stx][stz] = 0;
-                        // eslint-disable-next-line no-constant-condition
-                        while (true) {
-                            opcode = buf.g1;
-                            if (opcode === 0) {
-                                if (level === 0) {
-                                    this.levelHeightmap[0][stx][stz] = -World.perlin(stx + originX + 932731, stz + 556238 + originZ) * 8;
-                                } else {
-                                    this.levelHeightmap[level][stx][stz] = this.levelHeightmap[level - 1][stx][stz] - 240;
-                                }
-                                break;
-                            }
-
-                            if (opcode === 1) {
-                                let height: number = buf.g1;
-                                if (height === 1) {
-                                    height = 0;
-                                }
-                                if (level === 0) {
-                                    this.levelHeightmap[0][stx][stz] = -height * 8;
-                                } else {
-                                    this.levelHeightmap[level][stx][stz] = this.levelHeightmap[level - 1][stx][stz] - height * 8;
-                                }
-                                break;
-                            }
-
-                            if (opcode <= 49) {
-                                this.levelTileOverlayIds[level][stx][stz] = buf.g1b;
-                                this.levelTileOverlayShape[level][stx][stz] = ((((opcode - 2) / 4) | 0) << 24) >> 24;
-                                this.levelTileOverlayRotation[level][stx][stz] = (((opcode - 2) & 0x3) << 24) >> 24;
-                            } else if (opcode <= 81) {
-                                this.levelTileFlags[level][stx][stz] = ((opcode - 49) << 24) >> 24;
-                            } else {
-                                this.levelTileUnderlayIds[level][stx][stz] = ((opcode - 81) << 24) >> 24;
-                            }
-                        }
-                    } else {
-                        // eslint-disable-next-line no-constant-condition
-                        while (true) {
-                            opcode = buf.g1;
-                            if (opcode === 0) {
-                                break;
-                            }
-
-                            if (opcode === 1) {
-                                buf.g1;
-                                break;
-                            }
-
-                            if (opcode <= 49) {
-                                buf.g1;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    };
-
-    readLocs = (scene: World3D | null, locs: LinkList, collision: (CollisionMap | null)[], src: Int8Array, xOffset: number, zOffset: number): void => {
+    readLocs = (scene: World3D | null, collision: (CollisionMap | null)[], src: Int8Array, xOffset: number, zOffset: number): void => {
         const buf: Packet = new Packet(new Uint8Array(src));
         let locId: number = -1;
 
@@ -855,14 +981,14 @@ export default class World {
                         collisionMap = collision[currentLevel];
                     }
 
-                    this.addLoc(level, stx, stz, scene, locs, collisionMap, locId, shape, rotation);
+                    this.addLoc(level, stx, stz, scene, collisionMap, locId, shape, rotation);
                 }
             }
         }
     };
 
-    private addLoc = (level: number, x: number, z: number, scene: World3D | null, locs: LinkList, collision: CollisionMap | null, locId: number, shape: number, angle: number): void => {
-        if (World.lowMemory) {
+    private addLoc = (level: number, x: number, z: number, scene: World3D | null, collision: CollisionMap | null, locId: number, shape: number, angle: number): void => {
+        if (World.lowMemory && (this.levelTileFlags[level][x][z] & 0x2) === 0) {
             if ((this.levelTileFlags[level][x][z] & 0x10) !== 0) {
                 return;
             }
@@ -872,10 +998,14 @@ export default class World {
             }
         }
 
-        const heightSW: number = this.levelHeightmap[level][x][z];
-        const heightSE: number = this.levelHeightmap[level][x + 1][z];
-        const heightNW: number = this.levelHeightmap[level][x + 1][z + 1];
-        const heightNE: number = this.levelHeightmap[level][x][z + 1];
+        if (level < World.minLevel) {
+            World.minLevel = level;
+        }
+
+        let heightSW: number = this.levelHeightmap[level][x][z];
+        let heightSE: number = this.levelHeightmap[level][x + 1][z];
+        let heightNW: number = this.levelHeightmap[level][x][z + 1];
+        let heightNE: number = this.levelHeightmap[level][x + 1][z + 1];
         const y: number = (heightSW + heightSE + heightNW + heightNE) >> 2;
 
         const loc: LocType = LocType.get(locId);
@@ -890,19 +1020,28 @@ export default class World {
 
         if (shape === LocShape.GROUND_DECOR.id) {
             if (!World.lowMemory || loc.active || loc.forcedecor) {
-                scene?.addGroundDecoration(loc.getModel(LocShape.GROUND_DECOR.id, angle, heightSW, heightSE, heightNW, heightNE, -1), level, x, z, y, bitset, info);
+                let entity: Entity | null;
+                if (loc.anim === -1 && !loc.multiloc) {
+                    entity = loc.getModel(LocShape.GROUND_DECOR.id, angle, heightSW, heightSE, heightNE, heightNW, -1);
+                } else {
+                    entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                }
+
+                scene?.addGroundDecoration(entity, level, x, z, y, bitset, info);
 
                 if (loc.blockwalk && loc.active) {
                     collision?.addFloor(x, z);
                 }
-
-                if (loc.anim !== -1) {
-                    locs.addTail(new LocEntity(locId, level, 3, x, z, SeqType.instances[loc.anim], true));
-                }
             }
         } else if (shape === LocShape.CENTREPIECE_STRAIGHT.id || shape === LocShape.CENTREPIECE_DIAGONAL.id) {
-            const model: Model | null = loc.getModel(LocShape.CENTREPIECE_STRAIGHT.id, angle, heightSW, heightSE, heightNW, heightNE, -1);
-            if (model) {
+            let entity: Entity | null;
+            if (loc.anim === -1 && !loc.multiloc) {
+                entity = loc.getModel(LocShape.CENTREPIECE_STRAIGHT.id, angle, heightSW, heightSE, heightNE, heightNW, -1);
+            } else {
+                entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+            }
+
+            if (entity) {
                 let yaw: number = 0;
                 if (shape === LocShape.CENTREPIECE_DIAGONAL.id) {
                     yaw += 256;
@@ -918,16 +1057,25 @@ export default class World {
                     height = loc.length;
                 }
 
-                if (scene?.addLoc(level, x, z, y, model, null, bitset, info, width, height, yaw) && loc.shadow) {
-                    for (let dx: number = 0; dx <= width; dx++) {
-                        for (let dz: number = 0; dz <= height; dz++) {
-                            let shade: number = (model.radius / 4) | 0;
-                            if (shade > 30) {
-                                shade = 30;
-                            }
+                if (scene?.addLoc(level, x, z, y, entity, bitset, info, width, height, yaw) && loc.shadow) {
+                    let model: Model | null;
+                    if (entity instanceof Model) {
+                        model = entity;
+                    } else {
+                        model = loc.getModel(LocShape.CENTREPIECE_STRAIGHT.id, angle, heightSW, heightSE, heightNE, heightNW, -1);
+                    }
 
-                            if (shade > this.levelShademap[level][x + dx][z + dz]) {
-                                this.levelShademap[level][x + dx][z + dz] = (shade << 24) >> 24;
+                    if (model) {
+                        for (let dx: number = 0; dx <= width; dx++) {
+                            for (let dz: number = 0; dz <= height; dz++) {
+                                let shade: number = (model.radius / 4) | 0;
+                                if (shade > 30) {
+                                    shade = 30;
+                                }
+
+                                if (shade > this.levelShademap[level][x + dx][z + dz]) {
+                                    this.levelShademap[level][x + dx][z + dz] = (shade << 24) >> 24;
+                                }
                             }
                         }
                     }
@@ -937,12 +1085,15 @@ export default class World {
             if (loc.blockwalk) {
                 collision?.addLoc(x, z, loc.width, loc.length, angle, loc.blockrange);
             }
-
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 2, x, z, SeqType.instances[loc.anim], true));
-            }
         } else if (shape >= LocShape.ROOF_STRAIGHT.id) {
-            scene?.addLoc(level, x, z, y, loc.getModel(shape, angle, heightSW, heightSE, heightNW, heightNE, -1), null, bitset, info, 1, 1, 0);
+            let entity: Entity | null;
+            if (loc.anim === -1 && !loc.multiloc) {
+                entity = loc.getModel(shape, angle, heightSW, heightSE, heightNE, heightNW, -1);
+            } else {
+                entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+            }
+
+            scene?.addLoc(level, x, z, y, entity, bitset, info, 1, 1, 0);
 
             if (shape >= LocShape.ROOF_STRAIGHT.id && shape <= LocShape.ROOF_FLAT.id && shape !== LocShape.ROOF_DIAGONAL_WITH_ROOFEDGE.id && level > 0) {
                 this.levelOccludemap[level][x][z] |= 0x924;
@@ -951,12 +1102,15 @@ export default class World {
             if (loc.blockwalk) {
                 collision?.addLoc(x, z, loc.width, loc.length, angle, loc.blockrange);
             }
-
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 2, x, z, SeqType.instances[loc.anim], true));
-            }
         } else if (shape === LocShape.WALL_STRAIGHT.id) {
-            scene?.addWall(level, x, z, y, World.ROTATION_WALL_TYPE[angle], 0, loc.getModel(LocShape.WALL_STRAIGHT.id, angle, heightSW, heightSE, heightNW, heightNE, -1), null, bitset, info);
+            let entity: Entity | null;
+            if (loc.anim === -1 && !loc.multiloc) {
+                entity = loc.getModel(LocShape.WALL_STRAIGHT.id, angle, heightSW, heightSE, heightNE, heightNW, -1);
+            } else {
+                entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+            }
+
+            scene?.addWall(level, x, z, y, World.ROTATION_WALL_TYPE[angle], 0, entity, null, bitset, info);
 
             if (angle === LocAngle.WEST) {
                 if (loc.shadow) {
@@ -1000,15 +1154,18 @@ export default class World {
                 collision?.addWall(x, z, shape, angle, loc.blockrange);
             }
 
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 0, x, z, SeqType.instances[loc.anim], true));
-            }
-
             if (loc.wallwidth !== 16) {
                 scene?.setWallDecorationOffset(level, x, z, loc.wallwidth);
             }
         } else if (shape === LocShape.WALL_DIAGONAL_CORNER.id) {
-            scene?.addWall(level, x, z, y, World.ROTATION_WALL_CORNER_TYPE[angle], 0, loc.getModel(LocShape.WALL_DIAGONAL_CORNER.id, angle, heightSW, heightSE, heightNW, heightNE, -1), null, bitset, info);
+            let entity: Entity | null;
+            if (loc.anim === -1 && !loc.multiloc) {
+                entity = loc.getModel(LocShape.WALL_DIAGONAL_CORNER.id, angle, heightSW, heightSE, heightNE, heightNW, -1);
+            } else {
+                entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+            }
+
+            scene?.addWall(level, x, z, y, World.ROTATION_WALL_CORNER_TYPE[angle], 0, entity, null, bitset, info);
 
             if (loc.shadow) {
                 if (angle === LocAngle.WEST) {
@@ -1025,25 +1182,19 @@ export default class World {
             if (loc.blockwalk) {
                 collision?.addWall(x, z, shape, angle, loc.blockrange);
             }
-
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 0, x, z, SeqType.instances[loc.anim], true));
-            }
         } else if (shape === LocShape.WALL_L.id) {
             const offset: number = (angle + 1) & 0x3;
+            let entityA: Entity | null;
+            let entityB: Entity | null;
+            if (loc.anim === -1 && !loc.multiloc) {
+                entityA = loc.getModel(LocShape.WALL_L.id, angle + 4, heightSW, heightSE, heightNE, heightNW, -1);
+                entityB = loc.getModel(LocShape.WALL_L.id, offset, heightSW, heightSE, heightNE, heightNW, -1);
+            } else {
+                entityA = new LocEntity(locId, shape, angle + 4, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                entityB = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+            }
 
-            scene?.addWall(
-                level,
-                x,
-                z,
-                y,
-                World.ROTATION_WALL_TYPE[angle],
-                World.ROTATION_WALL_TYPE[offset],
-                loc.getModel(LocShape.WALL_L.id, angle + 4, heightSW, heightSE, heightNW, heightNE, -1),
-                loc.getModel(LocShape.WALL_L.id, offset, heightSW, heightSE, heightNW, heightNE, -1),
-                bitset,
-                info
-            );
+            scene?.addWall(level, x, z, y, World.ROTATION_WALL_TYPE[angle], World.ROTATION_WALL_TYPE[offset], entityA, entityB, bitset, info);
 
             if (loc.occlude) {
                 if (angle === LocAngle.WEST) {
@@ -1065,15 +1216,18 @@ export default class World {
                 collision?.addWall(x, z, shape, angle, loc.blockrange);
             }
 
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 0, x, z, SeqType.instances[loc.anim], true));
-            }
-
             if (loc.wallwidth !== 16) {
                 scene?.setWallDecorationOffset(level, x, z, loc.wallwidth);
             }
         } else if (shape === LocShape.WALL_SQUARE_CORNER.id) {
-            scene?.addWall(level, x, z, y, World.ROTATION_WALL_CORNER_TYPE[angle], 0, loc.getModel(LocShape.WALL_SQUARE_CORNER.id, angle, heightSW, heightSE, heightNW, heightNE, -1), null, bitset, info);
+            let entity: Entity | null;
+            if (loc.anim === -1 && !loc.multiloc) {
+                entity = loc.getModel(LocShape.WALL_SQUARE_CORNER.id, angle, heightSW, heightSE, heightNE, heightNW, -1);
+            } else {
+                entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+            }
+
+            scene?.addWall(level, x, z, y, World.ROTATION_WALL_CORNER_TYPE[angle], 0, entity, null, bitset, info);
 
             if (loc.shadow) {
                 if (angle === LocAngle.WEST) {
@@ -1090,69 +1244,96 @@ export default class World {
             if (loc.blockwalk) {
                 collision?.addWall(x, z, shape, angle, loc.blockrange);
             }
-
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 0, x, z, SeqType.instances[loc.anim], true));
-            }
         } else if (shape === LocShape.WALL_DIAGONAL.id) {
-            scene?.addLoc(level, x, z, y, loc.getModel(shape, angle, heightSW, heightSE, heightNW, heightNE, -1), null, bitset, info, 1, 1, 0);
+            let entity: Entity | null;
+            if (loc.anim === -1 && !loc.multiloc) {
+                entity = loc.getModel(LocShape.WALL_DIAGONAL.id, angle, heightSW, heightSE, heightNE, heightNW, -1);
+            } else {
+                entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+            }
+
+            scene?.addLoc(level, x, z, y, entity, bitset, info, 1, 1, 0);
 
             if (loc.blockwalk) {
                 collision?.addLoc(x, z, loc.width, loc.length, angle, loc.blockrange);
             }
-
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 2, x, z, SeqType.instances[loc.anim], true));
-            }
-        } else if (shape === LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id) {
-            scene?.setWallDecoration(level, x, z, y, 0, 0, bitset, loc.getModel(LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id, LocAngle.WEST, heightSW, heightSE, heightNW, heightNE, -1), info, angle * 512, World.ROTATION_WALL_TYPE[angle]);
-
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 1, x, z, SeqType.instances[loc.anim], true));
-            }
-        } else if (shape === LocShape.WALLDECOR_STRAIGHT_OFFSET.id) {
-            let offset: number = 16;
-            if (scene) {
-                const width: number = scene.getWallBitset(level, x, z);
-                if (width > 0) {
-                    offset = LocType.get((width >> 14) & 0x7fff).wallwidth;
+        } else {
+            if (loc.hillskew) {
+                if (angle === 1) {
+                    const tmp: number = heightNW;
+                    heightNW = heightNE;
+                    heightNE = heightSE;
+                    heightSE = heightSW;
+                    heightSW = tmp;
+                } else if (angle === 2) {
+                    let tmp: number = heightNW;
+                    heightNW = heightSE;
+                    heightSE = tmp;
+                    tmp = heightNE;
+                    heightNE = heightSW;
+                    heightSW = tmp;
+                } else if (angle === 3) {
+                    const tmp: number = heightNW;
+                    heightNW = heightSW;
+                    heightSW = heightSE;
+                    heightSE = heightNE;
+                    heightNE = tmp;
                 }
             }
 
-            scene?.setWallDecoration(
-                level,
-                x,
-                z,
-                y,
-                World.WALL_DECORATION_ROTATION_FORWARD_X[angle] * offset,
-                World.WALL_DECORATION_ROTATION_FORWARD_Z[angle] * offset,
-                bitset,
-                loc.getModel(LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id, LocAngle.WEST, heightSW, heightSE, heightNW, heightNE, -1),
-                info,
-                angle * 512,
-                World.ROTATION_WALL_TYPE[angle]
-            );
+            if (shape === LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id) {
+                let entity: Entity | null;
+                if (loc.anim === -1 && !loc.multiloc) {
+                    entity = loc.getModel(LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id, LocAngle.WEST, heightSW, heightSE, heightNE, heightNW, -1);
+                } else {
+                    entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                }
 
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 1, x, z, SeqType.instances[loc.anim], true));
-            }
-        } else if (shape === LocShape.WALLDECOR_DIAGONAL_OFFSET.id) {
-            scene?.setWallDecoration(level, x, z, y, 0, 0, bitset, loc.getModel(LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id, LocAngle.WEST, heightSW, heightSE, heightNW, heightNE, -1), info, angle, 256);
+                scene?.setWallDecoration(level, x, z, y, 0, 0, bitset, entity, info, angle * 512, World.ROTATION_WALL_TYPE[angle]);
+            } else if (shape === LocShape.WALLDECOR_STRAIGHT_OFFSET.id) {
+                let entity: Entity | null;
+                if (loc.anim === -1 && !loc.multiloc) {
+                    entity = loc.getModel(LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id, LocAngle.WEST, heightSW, heightSE, heightNE, heightNW, -1);
+                } else {
+                    entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                }
 
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 1, x, z, SeqType.instances[loc.anim], true));
-            }
-        } else if (shape === LocShape.WALLDECOR_DIAGONAL_NOOFFSET.id) {
-            scene?.setWallDecoration(level, x, z, y, 0, 0, bitset, loc.getModel(LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id, LocAngle.WEST, heightSW, heightSE, heightNW, heightNE, -1), info, angle, 512);
+                let offset: number = 16;
+                if (scene) {
+                    const width: number = scene.getWallBitset(level, x, z);
+                    if (width > 0) {
+                        offset = LocType.get((width >> 14) & 0x7fff).wallwidth;
+                    }
+                }
 
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 1, x, z, SeqType.instances[loc.anim], true));
-            }
-        } else if (shape === LocShape.WALLDECOR_DIAGONAL_BOTH.id) {
-            scene?.setWallDecoration(level, x, z, y, 0, 0, bitset, loc.getModel(LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id, LocAngle.WEST, heightSW, heightSE, heightNW, heightNE, -1), info, angle, 768);
+                scene?.setWallDecoration(level, x, z, y, World.WALL_DECORATION_ROTATION_FORWARD_X[angle] * offset, World.WALL_DECORATION_ROTATION_FORWARD_Z[angle] * offset, bitset, entity, info, angle * 512, World.ROTATION_WALL_TYPE[angle]);
+            } else if (shape === LocShape.WALLDECOR_DIAGONAL_OFFSET.id) {
+                let entity: Entity | null;
+                if (loc.anim === -1 && !loc.multiloc) {
+                    entity = loc.getModel(LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id, LocAngle.WEST, heightSW, heightSE, heightNE, heightNW, -1);
+                } else {
+                    entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                }
 
-            if (loc.anim !== -1) {
-                locs.addTail(new LocEntity(locId, level, 1, x, z, SeqType.instances[loc.anim], true));
+                scene?.setWallDecoration(level, x, z, y, 0, 0, bitset, entity, info, angle, 256);
+            } else if (shape === LocShape.WALLDECOR_DIAGONAL_NOOFFSET.id) {
+                let entity: Entity | null;
+                if (loc.anim === -1 && !loc.multiloc) {
+                    entity = loc.getModel(LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id, LocAngle.WEST, heightSW, heightSE, heightNE, heightNW, -1);
+                } else {
+                    entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                }
+
+                scene?.setWallDecoration(level, x, z, y, 0, 0, bitset, entity, info, angle, 512);
+            } else if (shape === LocShape.WALLDECOR_DIAGONAL_BOTH.id) {
+                let entity: Entity | null;
+                if (loc.anim === -1 && !loc.multiloc) {
+                    entity = loc.getModel(LocShape.WALLDECOR_STRAIGHT_NOOFFSET.id, LocAngle.WEST, heightSW, heightSE, heightNE, heightNW, -1);
+                } else {
+                    entity = new LocEntity(locId, shape, angle, heightSW, heightSE, heightNE, heightNW, loc.anim, true);
+                }
+
+                scene?.setWallDecoration(level, x, z, y, 0, 0, bitset, entity, info, angle, 768);
             }
         }
     };

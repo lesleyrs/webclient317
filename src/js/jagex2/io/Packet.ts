@@ -2,6 +2,7 @@ import {bigIntModPow, bigIntToBytes, bytesToBigInt} from '../util/JsUtil';
 import Isaac from './Isaac';
 import LinkList from '../datastruct/LinkList';
 import Hashable from '../datastruct/Hashable';
+import GameShell from '../client/GameShell';
 
 export default class Packet extends Hashable {
     private static readonly CRC32_POLYNOMIAL: number = 0xedb88320;
@@ -38,7 +39,7 @@ export default class Packet extends Hashable {
         }
     }
 
-    static crc32 = (src: Int8Array): number => {
+    static crc32 = (src: Int8Array | Uint8Array): number => {
         let crc: number = 0xffffffff;
         for (let i: number = 0; i < src.length; i++) {
             crc = (crc >>> 8) ^ Packet.crctable[(crc ^ src[i]) & 0xff];
@@ -166,11 +167,10 @@ export default class Packet extends Hashable {
     }
 
     get gjstr(): string {
-        const view: DataView = this.view;
-        const length: number = view.byteLength;
+        const length: number = this.view.byteLength;
         let str: string = '';
         let b: number;
-        while ((b = view.getUint8(this.pos++)) !== 10 && this.pos < length) {
+        while ((b = this.view.getUint8(this.pos++)) !== 10 && this.pos < length) {
             str += String.fromCharCode(b);
         }
         return str;
@@ -194,6 +194,7 @@ export default class Packet extends Hashable {
         this.pos += 2;
     }
 
+    // used for third party packets
     ip2(value: number): void {
         this.view.setUint16(this.pos, value, true);
         this.pos += 2;
@@ -210,6 +211,7 @@ export default class Packet extends Hashable {
         this.pos += 4;
     }
 
+    // used for third party packets
     ip4(value: number): void {
         this.view.setInt32(this.pos, value, true);
         this.pos += 4;
@@ -221,12 +223,11 @@ export default class Packet extends Hashable {
     }
 
     pjstr(str: string): void {
-        const view: DataView = this.view;
         const length: number = str.length;
         for (let i: number = 0; i < length; i++) {
-            view.setUint8(this.pos++, str.charCodeAt(i));
+            this.view.setUint8(this.pos++, str.charCodeAt(i));
         }
-        view.setUint8(this.pos++, 10);
+        this.view.setUint8(this.pos++, 10);
     }
 
     pdata(src: Uint8Array, length: number, offset: number): void {
@@ -281,4 +282,126 @@ export default class Packet extends Hashable {
         this.p1(rawEnc.length);
         this.pdata(rawEnc, rawEnc.length, 0);
     }
+
+    p1_alt1(value: number): void {
+        this.view.setUint8(this.pos++, -value);
+    }
+
+    p1_alt2(value: number): void {
+        this.view.setUint8(this.pos++, 128 - value);
+    }
+
+    // p1_alt3(value: number): void {
+    //     this.view.setUint8(this.pos++, value + 128);
+    // }
+
+    get g1_alt1(): number {
+        return -this.view.getUint8(this.pos++) & 0xff;
+    }
+
+    get g1_alt2(): number {
+        return (128 - this.view.getUint8(this.pos++)) & 0xff;
+    }
+
+    get g1_alt3(): number {
+        return (this.view.getUint8(this.pos++) - 128) & 0xff;
+    }
+
+    get g1b_alt1(): number {
+        return (-this.view.getInt8(this.pos++) << 24) >> 24;
+    }
+
+    get g1b_alt2(): number {
+        return ((128 - this.view.getInt8(this.pos++)) << 24) >> 24;
+    }
+
+    // get g1b_alt3(): number {
+    //     return this.view.getInt8(this.pos++) - 128 << 24 >> 24;
+    // }
+
+    p2_alt1(value: number): void {
+        this.view.setUint16(this.pos, value, true);
+        this.pos += 2;
+    }
+
+    p2_alt2(value: number): void {
+        this.view.setUint8(this.pos++, value >> 8);
+        this.view.setUint8(this.pos++, value + 128);
+    }
+
+    p2_alt3(value: number): void {
+        this.view.setUint8(this.pos++, value + 128);
+        this.view.setUint8(this.pos++, value >> 8);
+    }
+
+    get g2_alt1(): number {
+        const result: number = this.view.getUint16(this.pos, true);
+        this.pos += 2;
+        return result;
+    }
+
+    get g2_alt2(): number {
+        const result: number = (this.view.getUint8(this.pos++) << 8) | ((this.view.getUint8(this.pos++) - 128) & 0xff);
+        return result;
+    }
+
+    get g2_alt3(): number {
+        const result: number = ((this.view.getUint8(this.pos++) - 128) & 0xff) | (this.view.getUint8(this.pos++) << 8);
+        return result;
+    }
+
+    get g2b_alt1(): number {
+        const result: number = this.view.getInt16(this.pos, true);
+        this.pos += 2;
+        return result;
+    }
+
+    // get g2b_alt2(): number {
+    //     const result: number = (this.view.getInt8(this.pos++) << 8) | (this.view.getInt8(this.pos++) - 128 & 0xff);
+    //     return result;
+    // }
+
+    get g2b_alt3(): number {
+        const result: number = (this.view.getInt8(this.pos++) - 128) | (this.view.getInt8(this.pos++) << 8);
+        return result;
+    }
+
+    // get g4_alt1(): number {
+    //     const result: number = this.view.getInt32(this.pos, true);
+    //     this.pos += 4;
+    //     return result;
+    // }
+
+    // middle endian
+    get g4_alt2(): number {
+        const result: number = (this.view.getUint8(this.pos++) << 16) | (this.view.getUint8(this.pos++) << 24) | this.view.getUint8(this.pos++) | (this.view.getUint8(this.pos++) << 8);
+        return result;
+    }
+
+    // reverse middle endian
+    get g4_alt3(): number {
+        const result: number = (this.view.getUint8(this.pos++) << 8) | this.view.getUint8(this.pos++) | (this.view.getUint8(this.pos++) << 24) | (this.view.getUint8(this.pos++) << 16);
+        return result;
+    }
+
+    // pdata add
+    pdata_alt3(src: Uint8Array, length: number, offset: number): void {
+        for (let i: number = offset + length - 1; i >= offset; i--) {
+            this.view.setUint8(this.pos++, src[i] + 128);
+        }
+    }
+
+    // gdata reverse
+    gdata_alt1(length: number, offset: number, dest: Uint8Array | Int8Array): void {
+        for (let i: number = offset + length - 1; i >= offset; i--) {
+            dest[i] = this.view.getUint8(this.pos++);
+        }
+    }
+
+    // gdata_alt2(length: number, offset: number, dest: Uint8Array | Int8Array): void {
+    //     const total: number = offset + length;
+    //     for (let i: number = offset; i < total; i++) {
+    //         dest[i] = this.view.getUint8(this.pos++) - 128;
+    //     }
+    // }
 }

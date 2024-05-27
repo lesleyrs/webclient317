@@ -5,91 +5,105 @@ import Packet from '../io/Packet';
 export default class AnimFrame {
     static instances: AnimFrame[] = [];
 
-    static unpack = (models: Jagfile): void => {
-        const head: Packet = new Packet(models.read('frame_head.dat'));
-        const tran1: Packet = new Packet(models.read('frame_tran1.dat'));
-        const tran2: Packet = new Packet(models.read('frame_tran2.dat'));
-        const del: Packet = new Packet(models.read('frame_del.dat'));
+    static unpack = (src: Uint8Array): void => {
+        const offsets: Packet = new Packet(src);
+        offsets.pos = src.length - 8;
 
-        const total: number = head.g2;
-        head.pos += 2; // const count = head.g2;
+        const head: Packet = new Packet(src);
+        const tran1: Packet = new Packet(src);
+        const tran2: Packet = new Packet(src);
+        const del: Packet = new Packet(src);
+        const skel: Packet = new Packet(src);
 
-        const labels: Int32Array = new Int32Array(500);
+        let offset: number = 0;
+        head.pos = offset;
+        offset += offsets.g2 + 2;
+
+        tran1.pos = offset;
+        offset += offsets.g2;
+
+        tran2.pos = offset;
+        offset += offsets.g2;
+
+        del.pos = offset;
+        offset += offsets.g2;
+
+        skel.pos = offset;
+
+        const skeleton: AnimBase = new AnimBase(skel);
+
+        const frameCount: number = head.g2;
+        const bases: Int32Array = new Int32Array(500);
         const x: Int32Array = new Int32Array(500);
         const y: Int32Array = new Int32Array(500);
         const z: Int32Array = new Int32Array(500);
 
-        for (let i: number = 0; i < total; i++) {
-            const id: number = head.g2;
-            const frame: AnimFrame = (this.instances[id] = new AnimFrame());
+        for (let i: number = 0; i < frameCount; i++) {
+            const frame: AnimFrame = (this.instances[head.g2] = new AnimFrame());
             frame.delay = del.g1;
+            frame.skeleton = skeleton;
 
-            const baseId: number = head.g2;
-            const base: AnimBase = AnimBase.instances[baseId];
-            frame.base = base;
+            const baseCount: number = head.g1;
+            let lastBase: number = -1;
+            let length: number = 0;
 
-            const groupCount: number = head.g1;
-            let lastGroup: number = -1;
-            let current: number = 0;
-
-            for (let j: number = 0; j < groupCount; j++) {
-                if (!base.types) {
-                    throw new Error('SeqBase not loaded!!!');
-                }
+            for (let base: number = 0; base < baseCount; base++) {
                 const flags: number = tran1.g1;
 
-                if (flags > 0) {
-                    if (base.types[j] !== 0) {
-                        for (let group: number = j - 1; group > lastGroup; group--) {
-                            if (base.types[group] === 0) {
-                                labels[current] = group;
-                                x[current] = 0;
-                                y[current] = 0;
-                                z[current] = 0;
-                                current++;
-                                break;
-                            }
+                if (flags <= 0) {
+                    continue;
+                }
+
+                if (skeleton.types && skeleton.types[base] != AnimBase.OP_BASE) {
+                    for (let cur: number = base - 1; cur > lastBase; cur--) {
+                        if (skeleton.types[cur] == AnimBase.OP_BASE) {
+                            bases[length] = cur;
+                            x[length] = 0;
+                            y[length] = 0;
+                            z[length] = 0;
+                            length++;
+                            break;
                         }
                     }
-
-                    labels[current] = j;
-
-                    let defaultValue: number = 0;
-                    if (base.types[labels[current]] === 3) {
-                        defaultValue = 128;
-                    }
-
-                    if ((flags & 0x1) === 0) {
-                        x[current] = defaultValue;
-                    } else {
-                        x[current] = tran2.gsmart;
-                    }
-
-                    if ((flags & 0x2) === 0) {
-                        y[current] = defaultValue;
-                    } else {
-                        y[current] = tran2.gsmart;
-                    }
-
-                    if ((flags & 0x4) === 0) {
-                        z[current] = defaultValue;
-                    } else {
-                        z[current] = tran2.gsmart;
-                    }
-
-                    lastGroup = j;
-                    current++;
                 }
+                bases[length] = base;
+
+                let defaultValue: number = 0;
+
+                if (skeleton.types && skeleton.types[base] == AnimBase.OP_SCALE) {
+                    defaultValue = 128;
+                }
+
+                if ((flags & 1) != 0) {
+                    x[length] = tran2.gsmart;
+                } else {
+                    x[length] = defaultValue;
+                }
+
+                if ((flags & 2) != 0) {
+                    y[length] = tran2.gsmart;
+                } else {
+                    y[length] = defaultValue;
+                }
+
+                if ((flags & 4) != 0) {
+                    z[length] = tran2.gsmart;
+                } else {
+                    z[length] = defaultValue;
+                }
+
+                lastBase = base;
+                length++;
             }
 
-            frame.length = current;
-            frame.bases = new Int32Array(current);
-            frame.x = new Int32Array(current);
-            frame.y = new Int32Array(current);
-            frame.z = new Int32Array(current);
+            frame.length = length;
+            frame.bases = new Int32Array(length);
+            frame.x = new Int32Array(length);
+            frame.y = new Int32Array(length);
+            frame.z = new Int32Array(length);
 
-            for (let j: number = 0; j < current; j++) {
-                frame.bases[j] = labels[j];
+            for (let j: number = 0; j < length; j++) {
+                frame.bases[j] = bases[j];
                 frame.x[j] = x[j];
                 frame.y[j] = y[j];
                 frame.z[j] = z[j];
@@ -100,7 +114,7 @@ export default class AnimFrame {
     // ----
 
     delay: number = 0;
-    base: AnimBase | null = null;
+    skeleton: AnimBase | null = null;
     length: number = 0;
     bases: Int32Array | null = null;
     x: Int32Array | null = null;

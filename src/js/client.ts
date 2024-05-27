@@ -33,23 +33,24 @@ import SeqType from './jagex2/config/SeqType';
 import JString from './jagex2/datastruct/JString';
 import IdkType from './jagex2/config/IdkType';
 import {downloadUrl, sleep} from './jagex2/util/JsUtil';
-import Bzip from './vendor/bzip';
 import {playMidi, stopMidi} from './jagex2/util/AudioUtil';
 import LocType from './jagex2/config/LocType';
 import NpcType from './jagex2/config/NpcType';
 import FloType from './jagex2/config/FloType';
 import SpotAnimType from './jagex2/config/SpotAnimType';
 import VarpType from './jagex2/config/VarpType';
-import AnimBase from './jagex2/graphics/AnimBase';
 import AnimFrame from './jagex2/graphics/AnimFrame';
 import Tile from './jagex2/dash3d/type/Tile';
 import ClientWorkerStream from './jagex2/io/ClientWorkerStream';
 import {downloadURL} from './jagex2/util/SaveUtil';
 import {Host, Peer} from './jagex2/io/RTCDataChannels';
+import DiskStore from './jagex2/io/DiskStore';
+import VarbitType from './jagex2/config/VarbitType';
+import OnDemand from './jagex2/io/OnDemand';
 
 // noinspection JSSuspiciousNameCombination
 export abstract class Client extends GameShell {
-    static readonly clientversion: number = 225;
+    static readonly clientversion: number = 317;
     static nodeId: number = 10;
     static portOffset: number = 0;
     static members: boolean = true;
@@ -60,33 +61,19 @@ export abstract class Client extends GameShell {
     static chatEra: number = 2; // 0 - early beta, 1 - late beta, 2 - launch
     static cameraEditor: boolean = false;
     static githubRepository: string = 'https://raw.githubusercontent.com/2004scape/Server/main';
+    static jagStore = new Array<DiskStore>(5);
+    static client: Client;
 
     // original keys:
     static readonly exponent: bigint = 58778699976184461502525193738213253649000149147835990136706041084440742975821n;
     static readonly modulus: bigint = 7162900525229798032761816791230527296329313291232324290237849263501208207972894053929065636522363163621000728841182238772712427862772219676577293600221789n;
-
-    static cyclelogic1: number = 0;
-    static cyclelogic2: number = 0;
-    static cyclelogic3: number = 0;
-    static cyclelogic4: number = 0;
-    static cyclelogic5: number = 0;
-    static cyclelogic6: number = 0;
-
-    static oplogic1: number = 0;
-    static oplogic2: number = 0;
-    static oplogic3: number = 0;
-    static oplogic4: number = 0;
-    static oplogic5: number = 0;
-    static oplogic6: number = 0;
-    static oplogic7: number = 0;
-    static oplogic8: number = 0;
-    static oplogic9: number = 0;
 
     static setHighMemory = (): void => {
         World3D.lowMemory = false;
         Draw3D.lowMemory = false;
         Client.lowMemory = false;
         World.lowMemory = false;
+        LocType.lowMemory = false;
     };
 
     static setLowMemory = (): void => {
@@ -94,7 +81,14 @@ export abstract class Client extends GameShell {
         Draw3D.lowMemory = true;
         Client.lowMemory = true;
         World.lowMemory = true;
+        LocType.lowMemory = true;
     };
+
+    protected readonly INV_OP_ACTION = [632, 78, 867, 431, 53];
+    protected readonly OBJ_OP_ACTION = [652, 567, 234, 244, 214];
+    protected readonly OBJ_IOP_ACTION = [74, 454, 539, 493, 847];
+    protected readonly LOC_OP_ACTION = [502, 900, 113, 872, 1062];
+    protected readonly NPC_OP_ACTION = [20, 412, 225, 965, 478];
 
     protected readonly MAX_PLAYER_COUNT: number = 2048;
     protected readonly LOCAL_PLAYER_INDEX: number = 2047;
@@ -106,12 +100,13 @@ export abstract class Client extends GameShell {
 
     // important client stuff
     protected db: Database | null = null;
-    protected loopCycle: number = 0;
+    public static loopCycle: number = 0;
     protected archiveChecksums: number[] = [];
     protected stream: ClientStream | ClientWorkerStream | null = null;
     protected in: Packet = Packet.alloc(1);
     protected out: Packet = Packet.alloc(1);
     protected loginout: Packet = Packet.alloc(1);
+    protected chatBuffer: Packet = Packet.alloc(1);
     protected serverSeed: bigint = 0n;
     protected idleNetCycles: number = 0;
     protected idleTimeout: number = 0;
@@ -122,11 +117,13 @@ export abstract class Client extends GameShell {
     protected lastPacketType0: number = 0;
     protected lastPacketType1: number = 0;
     protected lastPacketType2: number = 0;
+    protected ondemand: OnDemand | null = null;
 
     // archives
     protected titleArchive: Jagfile | null = null;
 
     // login screen properties
+    protected loginAttempts: number = 0;
     protected redrawTitleBackground: boolean = true;
     protected titleScreenState: number = 0;
     protected titleLoginField: number = 0;
@@ -184,7 +181,6 @@ export abstract class Client extends GameShell {
     protected areaBackright1: PixMap | null = null;
     protected areaBackright2: PixMap | null = null;
     protected areaBacktop1: PixMap | null = null;
-    protected areaBacktop2: PixMap | null = null;
     protected areaBackvmid1: PixMap | null = null;
     protected areaBackvmid2: PixMap | null = null;
     protected areaBackvmid3: PixMap | null = null;
@@ -206,16 +202,19 @@ export abstract class Client extends GameShell {
     protected imageSideicons: (Pix8 | null)[] = new TypedArray1d(13, null);
     protected imageMinimap: Pix24 | null = null;
     protected imageCompass: Pix24 | null = null;
+    protected imageMapedge: Pix24 | null = null;
     protected imageMapscene: (Pix8 | null)[] = new TypedArray1d(50, null);
     protected imageMapfunction: (Pix24 | null)[] = new TypedArray1d(50, null);
     protected imageHitmarks: (Pix24 | null)[] = new TypedArray1d(20, null);
     protected imageHeadicons: (Pix24 | null)[] = new TypedArray1d(20, null);
-    protected imageMapflag: Pix24 | null = null;
+    protected imageMapflag0: Pix24 | null = null;
+    protected imageMapflag1: Pix24 | null = null;
     protected imageCrosses: (Pix24 | null)[] = new TypedArray1d(8, null);
     protected imageMapdot0: Pix24 | null = null;
     protected imageMapdot1: Pix24 | null = null;
     protected imageMapdot2: Pix24 | null = null;
     protected imageMapdot3: Pix24 | null = null;
+    protected imageMapdot4: Pix24 | null = null;
     protected imageScrollbar0: Pix8 | null = null;
     protected imageScrollbar1: Pix8 | null = null;
     protected imageRedstone1: Pix8 | null = null;
@@ -228,6 +227,7 @@ export abstract class Client extends GameShell {
     protected imageRedstone3v: Pix8 | null = null;
     protected imageRedstone1hv: Pix8 | null = null;
     protected imageRedstone2hv: Pix8 | null = null;
+    protected imageModIcons: (Pix8 | null)[] = new TypedArray1d(2, null);
 
     protected genderButtonImage0: Pix24 | null = null;
     protected genderButtonImage1: Pix24 | null = null;
@@ -239,6 +239,7 @@ export abstract class Client extends GameShell {
     protected redrawSideicons: boolean = false;
     protected redrawPrivacySettings: boolean = false;
     protected viewportInterfaceId: number = -1;
+    protected viewportOverlayInterfaceId: number = -1;
     protected dragCycles: number = 0;
     protected crossMode: number = 0;
     protected crossCycle: number = 0;
@@ -272,6 +273,7 @@ export abstract class Client extends GameShell {
     protected skillLevel: number[] = [];
     protected skillBaseLevel: number[] = [];
     protected levelExperience: number[] = [];
+    public static BITMASK: number[] = [];
     protected modalMessage: string | null = null;
     protected flashingTab: number = -1;
     protected selectedTab: number = 3;
@@ -286,7 +288,7 @@ export abstract class Client extends GameShell {
     protected socialInput: string = '';
     protected socialAction: number = 0;
     protected chatbackInput: string = '';
-    protected chatbackInputOpen: boolean = false;
+    protected chatbackInputType: number = -1;
     protected stickyChatInterfaceId: number = -1;
     protected messageText: (string | null)[] = new TypedArray1d(100, null);
     protected messageSender: (string | null)[] = new TypedArray1d(100, null);
@@ -316,7 +318,7 @@ export abstract class Client extends GameShell {
     protected selectedInterface: number = 0;
     protected selectedCycle: number = 0;
     protected pressedContinueOption: boolean = false;
-    protected varps: number[] = [];
+    public varps: Int32Array = new Int32Array(2000);
     protected varCache: number[] = [];
     protected spellSelected: number = 0;
     protected activeSpellId: number = 0;
@@ -337,9 +339,11 @@ export abstract class Client extends GameShell {
     protected daysSinceLastLogin: number = 0;
     protected daysSinceRecoveriesChanged: number = 0;
     protected unreadMessages: number = 0;
+    protected warnMembersInNonMembers: number = 0;
     protected activeMapFunctionCount: number = 0;
     protected activeMapFunctionX: Int32Array = new Int32Array(1000);
     protected activeMapFunctionZ: Int32Array = new Int32Array(1000);
+    protected bankArrangeMode: number = 0;
 
     // scene
     protected scene: World3D | null = null;
@@ -382,12 +386,13 @@ export abstract class Client extends GameShell {
     protected sceneMapLandData: (Int8Array | null)[] | null = null;
     protected sceneMapLocData: (Int8Array | null)[] | null = null;
     protected sceneMapIndex: Int32Array | null = null;
+    protected sceneMapLandFile: Int32Array | null = null;
+    protected sceneMapLocFile: Int32Array | null = null;
     protected mapLastBaseX: number = 0;
     protected mapLastBaseZ: number = 0;
     protected textureBuffer: Int8Array = new Int8Array(16384);
     protected levelCollisionMap: (CollisionMap | null)[] = new TypedArray1d(CollisionMap.LEVELS, null);
     protected currentLevel: number = 0;
-    protected cameraMovedWrite: number = 0;
     protected orbitCameraPitch: number = 128;
     protected orbitCameraYaw: number = 0;
     protected orbitCameraYawVelocity: number = 0;
@@ -409,6 +414,9 @@ export abstract class Client extends GameShell {
     protected cutsceneSrcHeight: number = 0;
     protected cutsceneMoveSpeed: number = 0;
     protected cutsceneMoveAcceleration: number = 0;
+    protected sceneLoadStartTime: number = 0;
+    protected awaitingSync: boolean = false;
+    protected sceneInstanced: boolean = false;
 
     // entities
     protected players: (PlayerEntity | null)[] = new TypedArray1d(this.MAX_PLAYER_COUNT, null);
@@ -419,15 +427,13 @@ export abstract class Client extends GameShell {
     protected entityUpdateIds: Int32Array = new Int32Array(this.MAX_PLAYER_COUNT);
     protected entityRemovalIds: Int32Array = new Int32Array(1000);
     protected playerAppearanceBuffer: (Packet | null)[] = new TypedArray1d(this.MAX_PLAYER_COUNT, null);
-    protected npcs: (NpcEntity | null)[] = new TypedArray1d(8192, null);
+    protected npcs: (NpcEntity | null)[] = new TypedArray1d(16384, null);
     protected npcCount: number = 0;
-    protected npcIds: Int32Array = new Int32Array(8192);
+    protected npcIds: Int32Array = new Int32Array(16384);
     protected projectiles: LinkList = new LinkList();
     protected spotanims: LinkList = new LinkList();
-    protected locList: LinkList = new LinkList();
     protected temporaryLocs: LinkList = new LinkList();
     protected levelObjStacks: (LinkList | null)[][][] = new TypedArray3d(CollisionMap.LEVELS, CollisionMap.SIZE, CollisionMap.SIZE, null);
-    protected spawnedLocations: LinkList = new LinkList();
 
     // bfs pathfinder
     protected bfsStepX: Int32Array = new Int32Array(4000);
@@ -445,14 +451,19 @@ export abstract class Client extends GameShell {
     protected heartbeatTimer: number = 0;
     protected wildernessLevel: number = 0;
     protected worldLocationState: number = 0;
-    protected rights: boolean = false;
+    protected rights: number = 0;
+    protected flagged: boolean = false; // TODO: do update game anti cheats
     protected designGenderMale: boolean = true;
     protected updateDesignModel: boolean = false;
     protected designIdentikits: Int32Array = new Int32Array(7);
     protected designColors: Int32Array = new Int32Array(5);
+    protected isMember: number = 0;
+    protected minimapState: number = 0;
+    protected withinTutorialIsland: boolean = false;
 
     // friends/chats
     protected friendCount: number = 0;
+    protected friendlistStatus: number = 0;
     protected chatCount: number = 0;
     static readonly MAX_CHATS: number = 50;
     protected chatX: Int32Array = new Int32Array(Client.MAX_CHATS);
@@ -481,9 +492,8 @@ export abstract class Client extends GameShell {
     protected lastWaveStartTime: number = 0;
     protected nextMusicDelay: number = 0;
     protected midiActive: boolean = true;
-    protected currentMidi: string | null = null;
-    protected midiCrc: number = 0;
-    protected midiSize: number = 0;
+    protected nextMidi: number = -1;
+    protected currentMidi: number = -1;
     protected midiVolume: number = 192;
 
     // webworker + webrtc
@@ -550,7 +560,6 @@ export abstract class Client extends GameShell {
         this.areaBackright1 = null;
         this.areaBackright2 = null;
         this.areaBacktop1 = null;
-        this.areaBacktop2 = null;
         this.areaBackvmid1 = null;
         this.areaBackvmid2 = null;
         this.areaBackvmid3 = null;
@@ -615,8 +624,6 @@ export abstract class Client extends GameShell {
         // @ts-expect-error Force unload. This happens when the browser reloads entirely.
         this.spotanims = null;
         // @ts-expect-error Force unload. This happens when the browser reloads entirely.
-        this.locList = null;
-        // @ts-expect-error Force unload. This happens when the browser reloads entirely.
         this.menuParamB = null;
         // @ts-expect-error Force unload. This happens when the browser reloads entirely.
         this.menuParamC = null;
@@ -672,7 +679,6 @@ export abstract class Client extends GameShell {
         Draw3D.unload();
         World3D.unload();
         Model.unload();
-        AnimBase.instances = [];
         AnimFrame.instances = [];
     };
 
@@ -681,7 +687,7 @@ export abstract class Client extends GameShell {
     }
 
     isChatBackInputOpen(): boolean {
-        return this.chatbackInputOpen;
+        return this.chatbackInputType != 0;
     }
 
     isShowSocialInput(): boolean {
@@ -694,6 +700,10 @@ export abstract class Client extends GameShell {
 
     getViewportInterfaceId(): number {
         return this.viewportInterfaceId;
+    }
+
+    getLocalPlayer(): PlayerEntity | null {
+        return this.localPlayer;
     }
 
     // ---- protected functions can be used by impl classes
@@ -798,71 +808,106 @@ export abstract class Client extends GameShell {
         }
     };
 
-    protected loadArchive = async (filename: string, displayName: string, crc: number, progress: number): Promise<Jagfile> => {
-        let retry: number = 5;
-        let data: Int8Array | undefined = await this.db?.cacheload(filename);
-        if (data && Packet.crc32(data) !== crc) {
-            data = undefined;
+    protected loadArchive = async (fileId: number, fileName: string, displayName: string, crc: number, progress: number): Promise<Jagfile> => {
+        const retry: number = 5;
+        // TODO:
+        // let data: Int8Array | undefined = await this.db?.cacheload(fileId);
+
+        // if (data && Packet.crc32(data) !== crc) {
+        //     data = undefined;
+        // }
+
+        let data: Jagfile | Uint8Array | null = null;
+        if (Client.jagStore[0]) {
+            data = Client.jagStore[0].read(fileId);
         }
 
         if (data) {
-            return new Jagfile(data);
+            return data as Jagfile;
+        } else {
+            throw new Error('loadarchive fail');
         }
 
-        while (!data) {
-            await this.showProgress(progress, `Requesting ${displayName}`);
+        // while (!data) {
+        //     await this.showProgress(progress, `Requesting ${displayName}`);
 
-            try {
-                if (+Client.getParameter('world') < 998) {
-                    data = await downloadUrl(`${Client.httpAddress}/${filename}${crc}`);
-                } else {
-                    data = await downloadUrl(`${Client.httpAddress}/${filename}`);
-                }
-            } catch (e) {
-                data = undefined;
-                for (let i: number = retry; i > 0; i--) {
-                    await this.showProgress(progress, `Error loading - Will retry in ${i} secs.`);
-                    await sleep(1000);
-                }
-                retry *= 2;
-                if (retry > 60) {
-                    retry = 60;
-                }
-            }
-        }
-        await this.db?.cachesave(filename, data);
-        return new Jagfile(data);
+        //     try {
+        //         if (+Client.getParameter('world') < 998) {
+        //             data = await downloadUrl(`${Client.httpAddress}/${fileName}${crc}`);
+        //         } else {
+        //             data = await downloadUrl(`${Client.httpAddress}/${fileName}`);
+        //         }
+        //     } catch (e) {
+        //         data = undefined;
+        //         for (let i: number = retry; i > 0; i--) {
+        //             await this.showProgress(progress, `Error loading - Will retry in ${i} secs.`);
+        //             await sleep(1000);
+        //         }
+        //         retry *= 2;
+        //         if (retry > 60) {
+        //             retry = 60;
+        //         }
+        //     }
+        // }
+        // await this.db?.cachesave(fileName, data);
+        // return new Jagfile(data as Uint8Array);
     };
 
-    protected setMidi = async (name: string, crc: number, length: number, fade: boolean): Promise<void> => {
-        let data: Int8Array | undefined = await this.db?.cacheload(name + '.mid');
-        if (data && crc !== 12345678 && Packet.crc32(data) !== crc) {
-            data = undefined;
-        }
+    // protected setMidi = async (name: string, crc: number, length: number, fade: boolean): Promise<void> => {
+    protected setMidi = async (next: number, fade: boolean): Promise<void> => {
+        // let data: Uint8Array | Jagfile | null = null;
+        // for (let i: number = 0; i < Client.jagStore[3].fileCount; i++) {
+        //     console.log(i)
+        //     data = Client.jagStore[3].read(i);
+        // }
 
-        if (!data) {
-            try {
-                if (+Client.getParameter('world') < 998) {
-                    data = await downloadUrl(`${Client.httpAddress}/${name}_${crc}.mid`);
-                } else {
-                    data = await downloadUrl(`${Client.httpAddress}/songs/${name}.mid`);
-                }
-                if (length !== data.length) {
-                    data = data.slice(0, length);
-                }
-            } catch (e) {
-                /* empty */
-            }
-        }
+        // TODO: no names just digits? also preload them?
+        const data: Jagfile | Uint8Array | null = Client.jagStore[3].read(next);
+        // if (!data) {
+        //     try {
+        //         if (+Client.getParameter('world') < 998) {
+        //             data = await downloadUrl(`${Client.httpAddress}/${name}_${crc}.mid`);
+        //         } else {
+        //             data = await downloadUrl(`${Client.httpAddress}/songs/${name}.mid`);
+        //         }
+        //         if (length !== data.length) {
+        //             data = data.slice(0, length);
+        //         }
+        //     } catch (e) {
+        //         /* empty */
+        //     }
+        // }
+
+        // if (data) {
+        //     data = data.read(name + '.mid');
+        // }
+
+        // let data: Int8Array | undefined = await this.db?.cacheload(name + '.mid');
+        // if (data && crc !== 12345678 && Packet.crc32(data) !== crc) {
+        //     data = undefined;
+        // }
+
+        // if (!data) {
+        //     try {
+        //         data = await downloadUrl(`${Client.httpAddress}/${name}_${crc}.mid`);
+        //         if (length !== data.length) {
+        //             data = data.slice(0, length);
+        //         }
+        //     } catch (e) {
+        //         /* empty */
+        //     }
+        // }
 
         if (!data) {
             return;
         }
         try {
-            await this.db?.cachesave(name + '.mid', data);
-            const uncompressedLength: number = new Packet(Uint8Array.from(data)).g4;
-            const uncompressed: Int8Array = Bzip.read(uncompressedLength, data, length, 4);
-            playMidi(uncompressed, this.midiVolume, fade);
+            // await this.db?.cachesave(name + '.mid', data);
+            // const uncompressedLength: number = new Packet(Uint8Array.from(data)).g4;
+            // const uncompressed: Int8Array = Bzip.read(uncompressedLength, data, length, 4);
+            // playMidi(uncompressed, this.midiVolume, fade);
+            // slice needed to copy data to preserve the arraybuffer
+            playMidi((data as Uint8Array).slice(), this.midiVolume, fade);
         } catch (e) {
             /* empty */
         }
@@ -1108,8 +1153,13 @@ export abstract class Client extends GameShell {
                             let dy: number = 0;
                             const id: number = child.invSlotObjId[slot] - 1;
 
-                            if ((slotX >= -32 && slotX <= 512 && slotY >= -32 && slotY <= 334) || (this.objDragArea !== 0 && this.objDragSlot === slot)) {
-                                const icon: Pix24 = ObjType.getIcon(id, child.invSlotObjCount[slot]);
+                            if ((slotX > Draw2D.left - 32 && slotX < Draw2D.right && slotY > Draw2D.top - 32 && slotY < Draw2D.bottom) || (this.objDragArea !== 0 && this.objDragSlot === slot)) {
+                                let outlineColor: number = 0;
+
+                                if (this.objSelected == 1 && this.objSelectedSlot == slot && this.objSelectedInterface == child.id) {
+                                    outlineColor = Colors.WHITE;
+                                }
+                                const icon: Pix24 = ObjType.getIcon(id, child.invSlotObjCount[slot], outlineColor);
                                 if (this.objDragArea !== 0 && this.objDragSlot === slot && this.objDragInterfaceId === child.id) {
                                     dx = this.mouseX - this.objGrabX;
                                     dy = this.mouseY - this.objGrabY;
@@ -1128,6 +1178,8 @@ export abstract class Client extends GameShell {
                                     }
 
                                     icon.drawAlpha(128, slotX + dx, slotY + dy);
+
+                                    // TODO: scroll component stuff? or elsewhere
                                 } else if (this.selectedArea !== 0 && this.selectedItem === slot && this.selectedInterface === child.id) {
                                     icon.drawAlpha(128, slotX, slotY);
                                 } else {
@@ -1174,6 +1226,15 @@ export abstract class Client extends GameShell {
                 if (child.buttonType === Component.BUTTON_CONTINUE && this.pressedContinueOption) {
                     text = 'Please wait...';
                     color = child.colour;
+                }
+
+                if (Draw2D.width2d === 479) {
+                    if (color === 0xffff00) {
+                        color = 0xff;
+                    }
+                    if (color === 0xc000) {
+                        color = 0xffffff;
+                    }
                 }
 
                 if (!font || !text) {
@@ -1333,38 +1394,104 @@ export abstract class Client extends GameShell {
     private updateInterfaceContent = (component: Component): void => {
         let clientCode: number = component.clientCode;
 
-        if (clientCode >= Component.CC_FRIENDS_START && clientCode <= Component.CC_FRIENDS_END) {
-            clientCode--;
-            if (clientCode >= this.friendCount) {
+        // TODO: check all this
+
+        if ((clientCode >= Component.CC_FRIENDS_START && clientCode <= Component.CC_FRIENDS_END) || (clientCode >= 701 && clientCode <= 800)) {
+            if (clientCode === 1 && this.friendlistStatus === 0) {
+                component.text = 'Loading friend list';
+                component.buttonType = 0;
+                return;
+            }
+
+            if (clientCode === 1 && this.friendlistStatus === 1) {
+                component.text = 'Connecting to friendserver';
+                component.buttonType = 0;
+                return;
+            }
+
+            if (clientCode === 2 && this.friendlistStatus !== 2) {
+                component.text = 'Please wait...';
+                component.buttonType = 0;
+                return;
+            }
+
+            let count: number = this.friendCount;
+
+            if (this.friendlistStatus !== 2) {
+                count = 0;
+            }
+
+            if (clientCode > 700) {
+                clientCode -= 601;
+            } else {
+                clientCode--;
+            }
+
+            if (clientCode >= count) {
                 component.text = '';
                 component.buttonType = 0;
             } else {
                 component.text = this.friendName[clientCode];
                 component.buttonType = 1;
             }
-        } else if (clientCode >= Component.CC_FRIENDS_UPDATE_START && clientCode <= Component.CC_FRIENDS_UPDATE_END) {
-            clientCode -= Component.CC_FRIENDS_UPDATE_START;
-            if (clientCode >= this.friendCount) {
+        } else if ((clientCode >= Component.CC_FRIENDS_UPDATE_START && clientCode <= Component.CC_FRIENDS_UPDATE_END) || (clientCode >= 801 && clientCode <= 900)) {
+            let count: number = this.friendCount;
+
+            if (this.friendlistStatus !== 2) {
+                count = 0;
+            }
+
+            if (clientCode > 800) {
+                clientCode -= 701;
+            } else {
+                clientCode -= Component.CC_FRIENDS_UPDATE_START;
+            }
+
+            if (clientCode >= count) {
                 component.text = '';
                 component.buttonType = 0;
-            } else {
-                if (this.friendWorld[clientCode] === 0) {
-                    component.text = '@red@Offline';
-                } else if (this.friendWorld[clientCode] === Client.nodeId) {
-                    component.text = '@gre@World-' + (this.friendWorld[clientCode] - 9);
-                } else {
-                    component.text = '@yel@World-' + (this.friendWorld[clientCode] - 9);
-                }
-                component.buttonType = 1;
+                return;
             }
+
+            if (this.friendWorld[clientCode] === 0) {
+                component.text = '@red@Offline';
+            } else if (this.friendWorld[clientCode] === Client.nodeId) {
+                component.text = '@gre@World-' + (this.friendWorld[clientCode] - 9);
+            } else {
+                component.text = '@yel@World-' + (this.friendWorld[clientCode] - 9);
+            }
+            component.buttonType = 1;
         } else if (clientCode === Component.CC_FRIENDS_SIZE) {
-            component.scroll = this.friendCount * 15 + 20;
+            let count: number = this.friendCount;
+
+            if (this.friendlistStatus != 2) {
+                count = 0;
+            }
+
+            component.scroll = count * 15 + 20;
             if (component.scroll <= component.height) {
                 component.scroll = component.height + 1;
             }
         } else if (clientCode >= Component.CC_IGNORES_START && clientCode <= Component.CC_IGNORES_END) {
-            clientCode -= Component.CC_IGNORES_START;
-            if (clientCode >= this.ignoreCount) {
+            if ((clientCode -= 401) === 0 && this.friendlistStatus === 0) {
+                component.text = 'Loading ignore list';
+                component.buttonType = 0;
+                return;
+            }
+
+            if (clientCode === 1 && this.friendlistStatus === 0) {
+                component.text = 'Please wait...';
+                component.buttonType = 0;
+                return;
+            }
+
+            let count: number = this.ignoreCount;
+
+            if (this.friendlistStatus == 0) {
+                count = 0;
+            }
+
+            if (clientCode >= count) {
                 component.text = '';
                 component.buttonType = 0;
             } else {
@@ -1378,7 +1505,7 @@ export abstract class Client extends GameShell {
             }
         } else if (clientCode === Component.CC_DESIGN_PREVIEW) {
             component.xan = 150;
-            component.yan = ((Math.sin(this.loopCycle / 40.0) * 256.0) | 0) & 0x7ff;
+            component.yan = ((Math.sin(Client.loopCycle / 40.0) * 256.0) | 0) & 0x7ff;
             if (this.updateDesignModel) {
                 this.updateDesignModel = false;
 
@@ -1407,7 +1534,9 @@ export abstract class Client extends GameShell {
                         model.createLabelReferences();
                         model.applyTransform(frames[0]);
                         model.calculateNormals(64, 850, -30, -50, -30, true);
-                        component.model = model;
+                        component.type = Component.MODEL_TYPE_PLAYER_DESIGN;
+                        component.modelID = 0;
+                        Component.cacheModel(0, Component.MODEL_TYPE_PLAYER_DESIGN, model);
                     }
                 }
             }
@@ -1433,7 +1562,7 @@ export abstract class Client extends GameShell {
             }
         } else if (clientCode === Component.CC_REPORT_INPUT) {
             component.text = this.reportAbuseInput;
-            if (this.loopCycle % 20 < 10) {
+            if (Client.loopCycle % 20 < 10) {
                 component.text = component.text + '|';
             } else {
                 component.text = component.text + ' ';
@@ -1477,7 +1606,11 @@ export abstract class Client extends GameShell {
             }
         } else if (clientCode === Component.CC_RECOVERY1) {
             if (this.daysSinceRecoveriesChanged === 201) {
-                component.text = '';
+                if (this.warnMembersInNonMembers === 1) {
+                    component.text = '@yel@This is a non-members world: @whi@Since you are a member we';
+                } else {
+                    component.text = '';
+                }
             } else if (this.daysSinceRecoveriesChanged === 200) {
                 component.text = 'You have not yet set any password recovery questions.';
             } else {
@@ -1493,7 +1626,11 @@ export abstract class Client extends GameShell {
             }
         } else if (clientCode === Component.CC_RECOVERY2) {
             if (this.daysSinceRecoveriesChanged === 201) {
-                component.text = '';
+                if (this.warnMembersInNonMembers === 1) {
+                    component.text = '@whi@recommend you use a members world instead. You may use';
+                } else {
+                    component.text = '';
+                }
             } else if (this.daysSinceRecoveriesChanged === 200) {
                 component.text = 'We strongly recommend you do so now to secure your account.';
             } else {
@@ -1501,7 +1638,11 @@ export abstract class Client extends GameShell {
             }
         } else if (clientCode === Component.CC_RECOVERY3) {
             if (this.daysSinceRecoveriesChanged === 201) {
-                component.text = '';
+                if (this.warnMembersInNonMembers === 1) {
+                    component.text = '@whi@this world but member benefits are unavailable whilst here.';
+                } else {
+                    component.text = '';
+                }
             } else if (this.daysSinceRecoveriesChanged === 200) {
                 component.text = "Do this from the 'account management' area on our front webpage";
             } else {
@@ -1521,34 +1662,38 @@ export abstract class Client extends GameShell {
                 // -1 is right bcos if an exception happen from array not being initialized in the lower code etc etc
                 return -1;
             }
-            let register: number = 0;
+            let acc: number = 0;
             let pc: number = 0;
+            let arith: number = 0;
 
             // eslint-disable-next-line no-constant-condition
             while (true) {
                 const opcode: number = script[pc++];
-                if (opcode === 0) {
-                    return register;
-                }
+                let register: number = 0;
+                let nextArithmetic: number = 0;
 
-                if (opcode === 1) {
+                if (opcode === 0) {
+                    return acc;
+                } else if (opcode === 1) {
                     // load_skill_level {skill}
-                    register += this.skillLevel[script[pc++]];
+                    register = this.skillLevel[script[pc++]];
                 } else if (opcode === 2) {
                     // load_skill_base_level {skill}
-                    register += this.skillBaseLevel[script[pc++]];
+                    register = this.skillBaseLevel[script[pc++]];
                 } else if (opcode === 3) {
                     // load_skill_exp {skill}
-                    register += this.skillExperience[script[pc++]];
+                    register = this.skillExperience[script[pc++]];
                 } else if (opcode === 4) {
                     // load_inv_count {interface id} {obj id}
                     const com: Component = Component.instances[script[pc++]];
-                    const obj: number = script[pc++] + 1;
+                    const obj: number = script[pc++];
 
-                    if (com.invSlotObjId && com.invSlotObjCount) {
-                        for (let i: number = 0; i < com.invSlotObjId.length; i++) {
-                            if (com.invSlotObjId[i] === obj) {
-                                register += com.invSlotObjCount[i];
+                    if (obj >= 0 && obj < ObjType.count && (!ObjType.get(obj).members || Client.members)) {
+                        if (com.invSlotObjId && com.invSlotObjCount) {
+                            for (let i: number = 0; i < com.invSlotObjId.length; i++) {
+                                if (com.invSlotObjId[i] === obj) {
+                                    register += com.invSlotObjCount[i];
+                                }
                             }
                         }
                     } else {
@@ -1556,21 +1701,22 @@ export abstract class Client extends GameShell {
                     }
                 } else if (opcode === 5) {
                     // load_var {id}
-                    register += this.varps[script[pc++]];
+                    register = this.varps[script[pc++]];
                 } else if (opcode === 6) {
                     // load_next_level_xp {skill}
-                    register += this.levelExperience[this.skillBaseLevel[script[pc++]] - 1];
+                    register = this.levelExperience[this.skillBaseLevel[script[pc++]] - 1];
                 } else if (opcode === 7) {
-                    register += ((this.varps[script[pc++]] * 100) / 46875) | 0;
+                    register = ((this.varps[script[pc++]] * 100) / 46875) | 0;
                 } else if (opcode === 8) {
                     // load_combat_level
-                    register += this.localPlayer?.combatLevel || 0;
+                    register = this.localPlayer?.combatLevel || 0;
                 } else if (opcode === 9) {
                     // load_total_level
-                    for (let i: number = 0; i < 19; i++) {
-                        if (i === 18) {
-                            // runecrafting
-                            i = 20;
+                    // TODO new skills class
+                    for (let i: number = 0; i < 21; i++) {
+                        if (i === 19) {
+                            // farming
+                            continue;
                         }
 
                         register += this.skillBaseLevel[i];
@@ -1580,24 +1726,67 @@ export abstract class Client extends GameShell {
                     const com: Component = Component.instances[script[pc++]];
                     const obj: number = script[pc++] + 1;
 
-                    for (let i: number = 0; i < com.invSlotObjId!.length; i++) {
-                        if (com.invSlotObjId![i] === obj) {
-                            register += 999999999;
-                            break;
+                    if (obj >= 0 && obj < ObjType.count && (!ObjType.get(obj).members || Client.members)) {
+                        for (let i: number = 0; i < com.invSlotObjId!.length; i++) {
+                            if (com.invSlotObjId![i] === obj) {
+                                register = 999999999;
+                                break;
+                            }
                         }
                     }
                 } else if (opcode === 11) {
                     // load_energy
-                    register += this.energy;
+                    register = this.energy;
                 } else if (opcode === 12) {
                     // load_weight
-                    register += this.weightCarried;
+                    register = this.weightCarried;
                 } else if (opcode === 13) {
                     // load_bool {varp} {bit: 0..31}
                     const varp: number = this.varps[script[pc++]];
                     const lsb: number = script[pc++];
 
-                    register += (varp & (0x1 << lsb)) === 0 ? 0 : 1;
+                    register = (varp & (0x1 << lsb)) === 0 ? 0 : 1;
+                } else if (opcode === 14) {
+                    // load_varbit {varbit}
+                    const varbit: VarbitType = VarbitType.instances[script[pc++]];
+                    const lsb: number = varbit.lsb;
+                    register = (this.varps[varbit.varp] >> lsb) & Client.BITMASK[varbit.msb - lsb];
+                } else if (opcode === 15) {
+                    // sub
+                    nextArithmetic = 1;
+                } else if (opcode === 16) {
+                    // div
+                    nextArithmetic = 2;
+                } else if (opcode === 17) {
+                    // mul
+                    nextArithmetic = 3;
+                } else if (opcode === 18) {
+                    // load_world_x
+                    register = (this.localPlayer!.x >> 7) + this.sceneBaseTileX;
+                } else if (opcode === 19) {
+                    // load_world_z
+                    register = (this.localPlayer!.z >> 7) + this.sceneBaseTileZ;
+                } else if (opcode === 20) {
+                    // load {value}
+                    register = script[pc++];
+                }
+
+                if (nextArithmetic == 0) {
+                    if (arith == 0) {
+                        acc += register;
+                    }
+                    if (arith == 1) {
+                        acc -= register;
+                    }
+                    if (arith == 2 && register != 0) {
+                        acc /= register;
+                    }
+                    if (arith == 3) {
+                        acc *= register;
+                    }
+                    arith = 0;
+                } else {
+                    arith = nextArithmetic;
                 }
             }
         } catch (e) {

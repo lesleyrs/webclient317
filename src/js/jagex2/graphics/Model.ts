@@ -1,4 +1,3 @@
-import Jagfile from '../io/Jagfile';
 import Packet from '../io/Packet';
 
 import Draw2D from './Draw2D';
@@ -6,8 +5,8 @@ import Draw3D from './Draw3D';
 import AnimFrame from './AnimFrame';
 import AnimBase from './AnimBase';
 
-import Hashable from '../datastruct/Hashable';
 import {Int32Array2d, TypedArray1d} from '../util/Arrays';
+import Entity from '../dash3d/entity/Entity';
 
 class Metadata {
     vertexCount: number = 0;
@@ -76,7 +75,7 @@ type ModelType = {
     vertexNormalOriginal?: (VertexNormal | null)[] | null;
 };
 
-export default class Model extends Hashable {
+export default class Model extends Entity {
     static metadata: (Metadata | null)[] | null = null;
 
     static head: Packet | null = null;
@@ -126,133 +125,10 @@ export default class Model extends Hashable {
     static pickedCount: number = 0;
     static pickedBitsets: Int32Array = new Int32Array(1000);
     static checkHoverFace: boolean = false;
+    static sin: Int32Array = Draw3D.sin;
+    static cos: Int32Array = Draw3D.cos;
 
-    static unpack(models: Jagfile): void {
-        try {
-            Model.head = new Packet(models.read('ob_head.dat'));
-            Model.face1 = new Packet(models.read('ob_face1.dat'));
-            Model.face2 = new Packet(models.read('ob_face2.dat'));
-            Model.face3 = new Packet(models.read('ob_face3.dat'));
-            Model.face4 = new Packet(models.read('ob_face4.dat'));
-            Model.face5 = new Packet(models.read('ob_face5.dat'));
-            Model.point1 = new Packet(models.read('ob_point1.dat'));
-            Model.point2 = new Packet(models.read('ob_point2.dat'));
-            Model.point3 = new Packet(models.read('ob_point3.dat'));
-            Model.point4 = new Packet(models.read('ob_point4.dat'));
-            Model.point5 = new Packet(models.read('ob_point5.dat'));
-            Model.vertex1 = new Packet(models.read('ob_vertex1.dat'));
-            Model.vertex2 = new Packet(models.read('ob_vertex2.dat'));
-            Model.axis = new Packet(models.read('ob_axis.dat'));
-
-            Model.head.pos = 0;
-            Model.point1.pos = 0;
-            Model.point2.pos = 0;
-            Model.point3.pos = 0;
-            Model.point4.pos = 0;
-            Model.vertex1.pos = 0;
-            Model.vertex2.pos = 0;
-
-            const count: number = Model.head.g2;
-            Model.metadata = new TypedArray1d(count + 100, null);
-
-            let vertexTextureDataOffset: number = 0;
-            let labelDataOffset: number = 0;
-            let triangleColorDataOffset: number = 0;
-            let triangleInfoDataOffset: number = 0;
-            let trianglePriorityDataOffset: number = 0;
-            let triangleAlphaDataOffset: number = 0;
-            let triangleSkinDataOffset: number = 0;
-
-            for (let i: number = 0; i < count; i++) {
-                const id: number = Model.head.g2;
-                const meta: Metadata = new Metadata();
-
-                meta.vertexCount = Model.head.g2;
-                meta.faceCount = Model.head.g2;
-                meta.texturedFaceCount = Model.head.g1;
-
-                meta.vertexFlagsOffset = Model.point1.pos;
-                meta.vertexXOffset = Model.point2.pos;
-                meta.vertexYOffset = Model.point3.pos;
-                meta.vertexZOffset = Model.point4.pos;
-                meta.faceVerticesOffset = Model.vertex1.pos;
-                meta.faceOrientationsOffset = Model.vertex2.pos;
-
-                const hasInfo: number = Model.head.g1;
-                const priority: number = Model.head.g1;
-                const hasAlpha: number = Model.head.g1;
-                const hasSkins: number = Model.head.g1;
-                const hasLabels: number = Model.head.g1;
-
-                for (let v: number = 0; v < meta.vertexCount; v++) {
-                    const flags: number = Model.point1.g1;
-
-                    if ((flags & 0x1) !== 0) {
-                        Model.point2.gsmart;
-                    }
-
-                    if ((flags & 0x2) !== 0) {
-                        Model.point3.gsmart;
-                    }
-
-                    if ((flags & 0x4) !== 0) {
-                        Model.point4.gsmart;
-                    }
-                }
-
-                for (let v: number = 0; v < meta.faceCount; v++) {
-                    const type: number = Model.vertex2.g1;
-
-                    if (type === 1) {
-                        Model.vertex1.gsmart;
-                        Model.vertex1.gsmart;
-                    }
-
-                    Model.vertex1.gsmart;
-                }
-
-                meta.faceColorsOffset = triangleColorDataOffset;
-                triangleColorDataOffset += meta.faceCount * 2;
-
-                if (hasInfo === 1) {
-                    meta.faceInfosOffset = triangleInfoDataOffset;
-                    triangleInfoDataOffset += meta.faceCount;
-                }
-
-                if (priority === 255) {
-                    meta.facePrioritiesOffset = trianglePriorityDataOffset;
-                    trianglePriorityDataOffset += meta.faceCount;
-                } else {
-                    meta.facePrioritiesOffset = -priority - 1;
-                }
-
-                if (hasAlpha === 1) {
-                    meta.faceAlphasOffset = triangleAlphaDataOffset;
-                    triangleAlphaDataOffset += meta.faceCount;
-                }
-
-                if (hasSkins === 1) {
-                    meta.faceLabelsOffset = triangleSkinDataOffset;
-                    triangleSkinDataOffset += meta.faceCount;
-                }
-
-                if (hasLabels === 1) {
-                    meta.vertexLabelsOffset = labelDataOffset;
-                    labelDataOffset += meta.vertexCount;
-                }
-
-                meta.faceTextureAxisOffset = vertexTextureDataOffset;
-                vertexTextureDataOffset += meta.texturedFaceCount;
-
-                Model.metadata[id] = meta;
-            }
-        } catch (err) {
-            console.log('Error loading model index');
-            console.error(err);
-        }
-    }
-
-    static unpack317(src: Uint8Array, id: number): void {
+    static unpack(src: Uint8Array, id: number): void {
         if (Model.metadata === null) {
             Model.metadata = [];
         }
@@ -949,7 +825,13 @@ export default class Model extends Hashable {
                             }
                         } else {
                             if (faceInfo) {
-                                faceInfo[faceCount] = model.faceInfo[face];
+                                let info: number = model.faceInfo[face];
+
+                                if ((info & 2) === 2) {
+                                    info += texturedFaceCount << 2;
+                                }
+
+                                faceInfo[faceCount] = info;
                             }
                         }
                     }
@@ -1039,216 +921,15 @@ export default class Model extends Hashable {
         });
     };
 
-    static model = (id: number): Model => {
-        if (!Model.metadata) {
-            throw new Error('cant loading model metadata!!!!!');
-        }
-
-        const meta: Metadata | null = Model.metadata[id];
-        if (!meta) {
-            console.log(`Error model:${id} not found!`);
-            throw new Error('cant loading model metadata!!!!!');
-        }
-
-        if (!Model.head || !Model.face1 || !Model.face2 || !Model.face3 || !Model.face4 || !Model.face5 || !Model.point1 || !Model.point2 || !Model.point3 || !Model.point4 || !Model.point5 || !Model.vertex1 || !Model.vertex2 || !Model.axis) {
-            throw new Error('cant loading model!!!!!');
-        }
-
-        const vertexCount: number = meta.vertexCount;
-        const faceCount: number = meta.faceCount;
-        const texturedFaceCount: number = meta.texturedFaceCount;
-
-        const vertexX: Int32Array = new Int32Array(vertexCount);
-        const vertexY: Int32Array = new Int32Array(vertexCount);
-        const vertexZ: Int32Array = new Int32Array(vertexCount);
-
-        const faceVertexA: Int32Array = new Int32Array(faceCount);
-        const faceVertexB: Int32Array = new Int32Array(faceCount);
-        const faceVertexC: Int32Array = new Int32Array(faceCount);
-
-        const texturedVertexA: Int32Array = new Int32Array(texturedFaceCount);
-        const texturedVertexB: Int32Array = new Int32Array(texturedFaceCount);
-        const texturedVertexC: Int32Array = new Int32Array(texturedFaceCount);
-
-        let vertexLabel: Int32Array | null = null;
-        if (meta.vertexLabelsOffset >= 0) {
-            vertexLabel = new Int32Array(vertexCount);
-        }
-
-        let faceInfo: Int32Array | null = null;
-        if (meta.faceInfosOffset >= 0) {
-            faceInfo = new Int32Array(faceCount);
-        }
-
-        let facePriority: Int32Array | null = null;
-        let priority: number = 0;
-        if (meta.facePrioritiesOffset >= 0) {
-            facePriority = new Int32Array(faceCount);
-        } else {
-            priority = -meta.facePrioritiesOffset - 1;
-        }
-
-        let faceAlpha: Int32Array | null = null;
-        if (meta.faceAlphasOffset >= 0) {
-            faceAlpha = new Int32Array(faceCount);
-        }
-
-        let faceLabel: Int32Array | null = null;
-        if (meta.faceLabelsOffset >= 0) {
-            faceLabel = new Int32Array(faceCount);
-        }
-
-        const faceColor: Int32Array = new Int32Array(faceCount);
-
-        Model.point1.pos = meta.vertexFlagsOffset;
-        Model.point2.pos = meta.vertexXOffset;
-        Model.point3.pos = meta.vertexYOffset;
-        Model.point4.pos = meta.vertexZOffset;
-        Model.point5.pos = meta.vertexLabelsOffset;
-
-        let dx: number = 0;
-        let dy: number = 0;
-        let dz: number = 0;
-        let a: number;
-        let b: number;
-        let c: number;
-
-        for (let v: number = 0; v < vertexCount; v++) {
-            const flags: number = Model.point1.g1;
-
-            a = 0;
-            if ((flags & 0x1) !== 0) {
-                a = Model.point2.gsmart;
-            }
-
-            b = 0;
-            if ((flags & 0x2) !== 0) {
-                b = Model.point3.gsmart;
-            }
-
-            c = 0;
-            if ((flags & 0x4) !== 0) {
-                c = Model.point4.gsmart;
-            }
-
-            vertexX[v] = dx + a;
-            vertexY[v] = dy + b;
-            vertexZ[v] = dz + c;
-            dx = vertexX[v];
-            dy = vertexY[v];
-            dz = vertexZ[v];
-
-            if (vertexLabel) {
-                vertexLabel[v] = Model.point5.g1;
-            }
-        }
-
-        Model.face1.pos = meta.faceColorsOffset;
-        Model.face2.pos = meta.faceInfosOffset;
-        Model.face3.pos = meta.facePrioritiesOffset;
-        Model.face4.pos = meta.faceAlphasOffset;
-        Model.face5.pos = meta.faceLabelsOffset;
-
-        for (let f: number = 0; f < faceCount; f++) {
-            faceColor[f] = Model.face1.g2;
-
-            if (faceInfo) {
-                faceInfo[f] = Model.face2.g1;
-            }
-
-            if (facePriority) {
-                facePriority[f] = Model.face3.g1;
-            }
-
-            if (faceAlpha) {
-                faceAlpha[f] = Model.face4.g1;
-            }
-
-            if (faceLabel) {
-                faceLabel[f] = Model.face5.g1;
-            }
-        }
-
-        Model.vertex1.pos = meta.faceVerticesOffset;
-        Model.vertex2.pos = meta.faceOrientationsOffset;
-
-        a = 0;
-        b = 0;
-        c = 0;
-        let last: number = 0;
-
-        for (let f: number = 0; f < faceCount; f++) {
-            const orientation: number = Model.vertex2.g1;
-
-            if (orientation === 1) {
-                a = Model.vertex1.gsmart + last;
-                last = a;
-                b = Model.vertex1.gsmart + last;
-                last = b;
-                c = Model.vertex1.gsmart + last;
-                last = c;
-            } else if (orientation === 2) {
-                b = c;
-                c = Model.vertex1.gsmart + last;
-                last = c;
-            } else if (orientation === 3) {
-                a = c;
-                c = Model.vertex1.gsmart + last;
-                last = c;
-            } else if (orientation === 4) {
-                const tmp: number = a;
-                a = b;
-                b = tmp;
-                c = Model.vertex1.gsmart + last;
-                last = c;
-            }
-
-            faceVertexA[f] = a;
-            faceVertexB[f] = b;
-            faceVertexC[f] = c;
-        }
-
-        Model.axis.pos = meta.faceTextureAxisOffset * 6;
-        for (let f: number = 0; f < texturedFaceCount; f++) {
-            texturedVertexA[f] = Model.axis.g2;
-            texturedVertexB[f] = Model.axis.g2;
-            texturedVertexC[f] = Model.axis.g2;
-        }
-        return new Model({
-            vertexCount: vertexCount,
-            vertexX: vertexX,
-            vertexY: vertexY,
-            vertexZ: vertexZ,
-            faceCount: faceCount,
-            faceVertexA: faceVertexA,
-            faceVertexB: faceVertexB,
-            faceVertexC: faceVertexC,
-            faceColorA: null,
-            faceColorB: null,
-            faceColorC: null,
-            faceInfo: faceInfo,
-            facePriority: facePriority,
-            faceAlpha: faceAlpha,
-            faceColor: faceColor,
-            priority: priority,
-            texturedFaceCount: texturedFaceCount,
-            texturedVertexA: texturedVertexA,
-            texturedVertexB: texturedVertexB,
-            texturedVertexC: texturedVertexC,
-            vertexLabel: vertexLabel,
-            faceLabel: faceLabel
-        });
-    };
-
-    // todo: 99% identical to above function...
-    // todo: have to pass src for now because arraybuffer is getting garbage collected
-    static model317 = (src: Uint8Array, id: number): Model => {
+    // TODO: 99% identical to above function...
+    // TODO: have to pass src for now because arraybuffer is getting garbage collected
+    static model = (src: Uint8Array, id: number): Model => {
         if (!Model.metadata || !Model.metadata[id]) {
             throw new Error('No model metadata');
         }
 
         const meta: Metadata = Model.metadata[id] as Metadata;
-        meta.data = src; // todo: see above comment
+        meta.data = src; // TODO: see above comment
 
         if (!meta.data.length) {
             throw new Error('No model data');
@@ -1496,7 +1177,6 @@ export default class Model extends Hashable {
     minZ: number;
     maxZ: number;
     radius: number;
-    minY: number;
     maxY: number;
     maxDepth: number;
     minDepth: number;
@@ -1555,21 +1235,21 @@ export default class Model extends Hashable {
     }
 
     calculateBoundsCylinder(): void {
-        this.maxY = 0;
-        this.radius = 0;
         this.minY = 0;
+        this.radius = 0;
+        this.maxY = 0;
 
         for (let i: number = 0; i < this.vertexCount; i++) {
             const x: number = this.vertexX[i];
             const y: number = this.vertexY[i];
             const z: number = this.vertexZ[i];
 
-            if (-y > this.maxY) {
-                this.maxY = -y;
+            if (-y > this.minY) {
+                this.minY = -y;
             }
 
-            if (y > this.minY) {
-                this.minY = y;
+            if (y > this.maxY) {
+                this.maxY = y;
             }
 
             const radiusSqr: number = x * x + z * z;
@@ -1579,28 +1259,28 @@ export default class Model extends Hashable {
         }
 
         this.radius = (Math.sqrt(this.radius) + 0.99) | 0;
-        this.minDepth = (Math.sqrt(this.radius * this.radius + this.maxY * this.maxY) + 0.99) | 0;
-        this.maxDepth = this.minDepth + ((Math.sqrt(this.radius * this.radius + this.minY * this.minY) + 0.99) | 0);
+        this.minDepth = (Math.sqrt(this.radius * this.radius + this.minY * this.minY) + 0.99) | 0;
+        this.maxDepth = this.minDepth + ((Math.sqrt(this.radius * this.radius + this.maxY * this.maxY) + 0.99) | 0);
     }
 
     calculateBoundsY(): void {
-        this.maxY = 0;
         this.minY = 0;
+        this.maxY = 0;
 
         for (let v: number = 0; v < this.vertexCount; v++) {
             const y: number = this.vertexY[v];
 
-            if (-y > this.maxY) {
-                this.maxY = -y;
+            if (-y > this.minY) {
+                this.minY = -y;
             }
 
-            if (y > this.minY) {
-                this.minY = y;
+            if (y > this.maxY) {
+                this.maxY = y;
             }
         }
 
-        this.minDepth = (Math.sqrt(this.radius * this.radius + this.maxY * this.maxY) + 0.99) | 0;
-        this.maxDepth = this.minDepth + ((Math.sqrt(this.radius * this.radius + this.minY * this.minY) + 0.99) | 0);
+        this.minDepth = (Math.sqrt(this.radius * this.radius + this.minY * this.minY) + 0.99) | 0;
+        this.maxDepth = this.minDepth + ((Math.sqrt(this.radius * this.radius + this.maxY * this.maxY) + 0.99) | 0);
     }
 
     createLabelReferences(): void {
@@ -1670,8 +1350,19 @@ export default class Model extends Hashable {
             this.applyTransform(primaryId);
         } else {
             const primary: AnimFrame = AnimFrame.instances[primaryId];
+
+            if (!primary) {
+                return;
+            }
+
             const secondary: AnimFrame = AnimFrame.instances[secondaryId];
-            const skeleton: AnimBase | null = primary.base;
+
+            if (!secondary) {
+                this.applyTransform(primaryId);
+                return;
+            }
+
+            const skeleton: AnimBase | null = primary.skeleton;
 
             Model.baseX = 0;
             Model.baseY = 0;
@@ -1701,7 +1392,7 @@ export default class Model extends Hashable {
             counter = 0;
             maskBase = mask[counter++];
 
-            for (let i: number = 0; i < secondary.length; i++) {
+            for (let i: number = 0; i < primary.length; i++) {
                 if (!secondary.bases) {
                     continue;
                 }
@@ -1723,7 +1414,10 @@ export default class Model extends Hashable {
         }
 
         const transform: AnimFrame = AnimFrame.instances[id];
-        const skeleton: AnimBase | null = transform.base;
+        if (!transform) {
+            return;
+        }
+        const skeleton: AnimBase | null = transform.skeleton;
 
         Model.baseX = 0;
         Model.baseY = 0;
@@ -2067,13 +1761,13 @@ export default class Model extends Hashable {
             return;
         }
 
-        const yPrime: number = radiusSinEyePitch + ((this.maxY * cosEyePitch) >> 16);
+        const yPrime: number = radiusSinEyePitch + ((this.minY * cosEyePitch) >> 16);
         let topY: number = (midY - yPrime) << 9;
         if (((topY / maxZ) | 0) >= Draw2D.centerY2d) {
             return;
         }
 
-        const radiusZ: number = radiusCosEyePitch + ((this.maxY * sinEyePitch) >> 16);
+        const radiusZ: number = radiusCosEyePitch + ((this.minY * sinEyePitch) >> 16);
 
         let clipped: boolean = midZ - radiusZ <= 50;
         let picking: boolean = false;
@@ -2833,7 +2527,7 @@ export default class Model extends Hashable {
         }
     }
 
-    private applyTransform2(x: number, y: number, z: number, labels: Uint8Array | null, type: number): void {
+    private applyTransform2(x: number, y: number, z: number, labels: Int32Array | null, type: number): void {
         if (!labels) {
             return;
         }
@@ -2993,9 +2687,9 @@ export default class Model extends Hashable {
     }
 
     private calculateBoundsAABB(): void {
-        this.maxY = 0;
-        this.radius = 0;
         this.minY = 0;
+        this.radius = 0;
+        this.maxY = 0;
         this.minX = 999999;
         this.maxX = -999999;
         this.maxZ = -99999;
@@ -3022,12 +2716,12 @@ export default class Model extends Hashable {
                 this.maxZ = z;
             }
 
-            if (-y > this.maxY) {
-                this.maxY = -y;
+            if (-y > this.minY) {
+                this.minY = -y;
             }
 
-            if (y > this.minY) {
-                this.minY = y;
+            if (y > this.maxY) {
+                this.maxY = y;
             }
 
             const radiusSqr: number = x * x + z * z;
@@ -3037,8 +2731,8 @@ export default class Model extends Hashable {
         }
 
         this.radius = Math.sqrt(this.radius) | 0;
-        this.minDepth = Math.sqrt(this.radius * this.radius + this.maxY * this.maxY) | 0;
-        this.maxDepth = this.minDepth + (Math.sqrt(this.radius * this.radius + this.minY * this.minY) | 0);
+        this.minDepth = Math.sqrt(this.radius * this.radius + this.minY * this.minY) | 0;
+        this.maxDepth = this.minDepth + (Math.sqrt(this.radius * this.radius + this.maxY * this.maxY) | 0);
     }
 
     private pointWithinTriangle(x: number, y: number, yA: number, yB: number, yC: number, xA: number, xB: number, xC: number): boolean {

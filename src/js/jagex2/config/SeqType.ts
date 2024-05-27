@@ -10,6 +10,10 @@ export default class SeqType extends ConfigType {
     static unpack = (config: Jagfile): void => {
         const dat: Packet = new Packet(config.read('seq.dat'));
         this.count = dat.g2;
+        if (!this.instances) {
+            this.instances = new Array(this.count);
+        }
+
         for (let i: number = 0; i < this.count; i++) {
             const seq: SeqType = new SeqType(i).decodeType(dat);
             if (seq.frameCount === 0) {
@@ -24,7 +28,22 @@ export default class SeqType extends ConfigType {
                 seq.delay = new Int16Array(1);
                 seq.delay[0] = -1;
             }
-            this.instances[i] = seq;
+            if (seq.movestyle === -1) {
+                if (seq.walkmerge) {
+                    seq.movestyle = 2;
+                } else {
+                    seq.movestyle = 0;
+                }
+            }
+            if (seq.idlestyle === -1) {
+                if (seq.walkmerge) {
+                    seq.idlestyle = 2;
+                }
+                seq.idlestyle = 0;
+            }
+            if (!SeqType.instances[i]) {
+                this.instances[i] = seq;
+            }
         }
     };
 
@@ -41,6 +60,9 @@ export default class SeqType extends ConfigType {
     righthand: number = -1;
     lefthand: number = -1;
     replaycount: number = 99;
+    movestyle: number = -1;
+    idlestyle: number = -1;
+    replaystyle: number = 2;
     duration: number = 0;
 
     decode(code: number, dat: Packet): void {
@@ -52,22 +74,12 @@ export default class SeqType extends ConfigType {
 
             for (let i: number = 0; i < this.frameCount; i++) {
                 this.frames[i] = dat.g2;
-
                 this.iframes[i] = dat.g2;
                 if (this.iframes[i] === 65535) {
                     this.iframes[i] = -1;
                 }
 
                 this.delay[i] = dat.g2;
-                if (this.delay[i] === 0) {
-                    this.delay[i] = AnimFrame.instances[this.frames[i]].delay;
-                }
-
-                if (this.delay[i] === 0) {
-                    this.delay[i] = 1;
-                }
-
-                this.duration += this.delay[i];
             }
         } else if (code === 2) {
             this.replayoff = dat.g2;
@@ -92,8 +104,35 @@ export default class SeqType extends ConfigType {
             this.lefthand = dat.g2;
         } else if (code === 8) {
             this.replaycount = dat.g1;
+        } else if (code == 9) {
+            this.movestyle = dat.g1;
+        } else if (code == 10) {
+            this.idlestyle = dat.g1;
+        } else if (code == 11) {
+            this.replaystyle = dat.g1;
+        } else if (code == 12) {
+            dat.g4;
         } else {
             console.log('Error unrecognised seq config code: ', code);
         }
+    }
+
+    getFrameDuration(frame: number): number {
+        let duration: number = 0;
+        if (this.delay) {
+            duration = this.delay[frame];
+
+            if (duration === 0 && this.frames) {
+                const transform: AnimFrame = AnimFrame.instances[this.frames[frame]];
+                if (transform && this.delay) {
+                    duration = this.delay[frame] = transform.delay;
+                }
+            }
+
+            if (duration === 0) {
+                duration = 1;
+            }
+        }
+        return duration;
     }
 }

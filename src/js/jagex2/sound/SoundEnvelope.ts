@@ -18,6 +18,10 @@ export default class SoundEnvelope {
         this.form = dat.g1;
         this.start = dat.g4;
         this.end = dat.g4;
+        this.readShape(dat);
+    }
+
+    readShape(dat: Packet): void {
         this.length = dat.g1;
         this.shapeDelta = new Int32Array(this.length);
         this.shapePeak = new Int32Array(this.length);

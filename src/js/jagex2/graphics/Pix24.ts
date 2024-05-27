@@ -10,9 +10,9 @@ import Pix8 from './Pix8';
 
 export default class Pix24 extends Hashable {
     // constructor
-    readonly pixels: Int32Array;
-    readonly width: number;
-    readonly height: number;
+    pixels: Int32Array;
+    width: number;
+    height: number;
     cropX: number;
     cropY: number;
     cropW: number;
@@ -329,74 +329,18 @@ export default class Pix24 extends Hashable {
         }
     }
 
-    crop(x: number, y: number, w: number, h: number): void {
-        x |= 0;
-        y |= 0;
-        w |= 0;
-        h |= 0;
-
-        try {
-            const currentW: number = this.width;
-            // const currentH: number = this.height; // dead code
-
-            let offW: number = 0;
-            let offH: number = 0;
-            // let scaleWidth: number = (currentW << 16) / w; // dead code
-            // let scaleHeight: number = (currentH << 16) / h; // dead code
-
-            const cw: number = this.cropW;
-            const ch: number = this.cropH;
-            const scaleCropWidth: number = ((cw << 16) / w) | 0;
-            const scaleCropHeight: number = ((ch << 16) / h) | 0;
-
-            x += ((this.cropX * w + cw - 1) / cw) | 0;
-            y += ((this.cropY * h + ch - 1) / ch) | 0;
-
-            if ((this.cropX * w) % cw !== 0) {
-                offW = (((cw - ((this.cropX * w) % cw)) << 16) / w) | 0;
+    crop(): void {
+        const pixels: Int32Array = new Int32Array(this.cropW * this.cropH);
+        for (let y: number = 0; y < this.height; y++) {
+            for (let x: number = 0; x < this.width; x++) {
+                pixels[(y + this.cropY) * this.cropW + x + this.cropX] = this.pixels[y * this.width + x];
             }
-
-            if ((this.cropY * h) % ch !== 0) {
-                offH = (((ch - ((this.cropY * h) % ch)) << 16) / h) | 0;
-            }
-
-            w = ((w * (this.width - (offW >> 16))) / cw) | 0;
-            h = ((h * (this.height - (offH >> 16))) / ch) | 0;
-
-            let dstStep: number = x + y * Draw2D.width2d;
-            let dstOff: number = Draw2D.width2d - w;
-
-            if (y < Draw2D.top) {
-                const cutoff: number = Draw2D.top - y;
-                h -= cutoff;
-                y = 0;
-                dstStep += cutoff * Draw2D.width2d;
-                offH += scaleCropHeight * cutoff;
-            }
-
-            if (y + h > Draw2D.bottom) {
-                h -= y + h - Draw2D.bottom;
-            }
-
-            if (x < Draw2D.left) {
-                const cutoff: number = Draw2D.left - x;
-                w -= cutoff;
-                x = 0;
-                dstStep += cutoff;
-                offW += scaleCropWidth * cutoff;
-                dstOff += cutoff;
-            }
-
-            if (x + w > Draw2D.right) {
-                const cutoff: number = x + w - Draw2D.right;
-                w -= cutoff;
-                dstOff += cutoff;
-            }
-
-            this.scale(w, h, this.pixels, offW, offH, Draw2D.pixels, dstOff, dstStep, currentW, scaleCropWidth, scaleCropHeight);
-        } catch (e) {
-            console.error('error in sprite clipping routine');
         }
+        this.pixels = pixels;
+        this.width = this.cropW;
+        this.height = this.cropH;
+        this.cropX = 0;
+        this.cropY = 0;
     }
 
     drawRotatedMasked(x: number, y: number, w: number, h: number, lineStart: Int32Array, lineWidth: Int32Array, anchorX: number, anchorY: number, theta: number, zoom: number): void {
@@ -428,6 +372,49 @@ export default class Pix24 extends Hashable {
                     Draw2D.pixels[dstX++] = this.pixels[(srcX >> 16) + (srcY >> 16) * this.width];
                     srcX += cosZoom;
                     srcY -= sinZoom;
+                }
+
+                leftX += sinZoom;
+                leftY += cosZoom;
+                leftOff += Draw2D.width2d;
+            }
+        } catch (e) {
+            /* empty */
+        }
+    }
+
+    drawRotated(x: number, y: number, w: number, h: number, anchorX: number, anchorY: number, theta: number, zoom: number): void {
+        x |= 0;
+        y |= 0;
+        w |= 0;
+        h |= 0;
+
+        try {
+            const centerX: number = (-w / 2) | 0;
+            const centerY: number = (-h / 2) | 0;
+
+            const sin: number = (Math.sin(theta) * 65536) | 0;
+            const cos: number = (Math.cos(theta) * 65536) | 0;
+            const sinZoom: number = (sin * zoom) >> 8;
+            const cosZoom: number = (cos * zoom) >> 8;
+
+            let leftX: number = (anchorX << 16) + centerY * sinZoom + centerX * cosZoom;
+            let leftY: number = (anchorY << 16) + (centerY * cosZoom - centerX * sinZoom);
+            let leftOff: number = x + y * Draw2D.width2d;
+
+            for (let i: number = 0; i < h; i++) {
+                let dstOff: number = leftOff;
+                let dstX: number = leftX;
+                let dstY: number = leftY;
+                for (let j: number = -w; j < 0; j++) {
+                    const rgb: number = this.pixels[(dstX >> 16) + (dstY >> 16) * this.width];
+                    if (rgb != 0) {
+                        Draw2D.pixels[dstOff++] = rgb;
+                    } else {
+                        dstOff++;
+                    }
+                    dstX += cosZoom;
+                    dstY -= sinZoom;
                 }
 
                 leftX += sinZoom;

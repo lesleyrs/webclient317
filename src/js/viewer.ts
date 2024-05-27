@@ -184,7 +184,7 @@ class Viewer extends Client {
             const data: Uint8Array | Jagfile | null = this.modelStore.read(i);
 
             if (data !== null) {
-                Model.unpack317(data as Uint8Array, i);
+                Model.unpack(data as Uint8Array, i);
             }
         }
 
@@ -216,7 +216,7 @@ class Viewer extends Client {
 
         const data: Uint8Array | Jagfile | null = this.modelStore.read(id);
         if (data !== null) {
-            this.model.built = Model.model317(data as Uint8Array, id);
+            this.model.built = Model.model(data as Uint8Array, id);
             this.model.built.calculateNormals(64, 850, -30, -50, -30, true);
             document.title = `Model ${id} | 2004Scape Tools`;
         } else {

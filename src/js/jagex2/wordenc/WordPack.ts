@@ -68,7 +68,7 @@ export default class WordPack {
                 }
             }
             if (currentChar > 12) {
-                currentChar += 195;
+                currentChar += ' '.charCodeAt(0) + '£'.charCodeAt(0);
             }
             if (carry === -1) {
                 if (currentChar < 13) {

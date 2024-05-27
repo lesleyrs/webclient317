@@ -1,6 +1,7 @@
 import Entity from './Entity';
 import SeqType from '../../config/SeqType';
 import {TypedArray1d} from '../../util/Arrays';
+import {Game} from '../../../game';
 
 export default abstract class PathingEntity extends Entity {
     x: number = 0;
@@ -19,8 +20,6 @@ export default abstract class PathingEntity extends Entity {
     chatTimer: number = 100;
     chatColor: number = 0;
     chatStyle: number = 0;
-    damage: number = 0;
-    damageType: number = 0;
     combatCycle: number = -1000;
     health: number = 0;
     totalHealth: number = 0;
@@ -48,23 +47,28 @@ export default abstract class PathingEntity extends Entity {
     forceMoveStartCycle: number = 0;
     forceMoveFaceDirection: number = 0;
     cycle: number = 0;
-    height: number = 0;
+    height: number = 200;
     dstYaw: number = 0;
     pathLength: number = 0;
     pathTileX: Int32Array = new Int32Array(10);
     pathTileZ: Int32Array = new Int32Array(10);
+    damage: Int32Array = new Int32Array(4);
+    damageType: Int32Array = new Int32Array(4);
+    damageCycle: Int32Array = new Int32Array(4);
     pathRunning: boolean[] = new TypedArray1d(10, false);
     seqTrigger: number = 0;
+    turnSpeed: number = 32;
 
     lastMask: number = -1;
     lastMaskCycle: number = -1;
     lastFaceX: number = -1;
     lastFaceZ: number = -1;
+    seqPathLength: number = 0;
 
     abstract isVisible(): boolean;
 
     move(teleport: boolean, x: number, z: number): void {
-        if (this.primarySeqId !== -1 && SeqType.instances[this.primarySeqId].priority <= 1) {
+        if (this.primarySeqId !== -1 && SeqType.instances[this.primarySeqId].priority == 1) {
             this.primarySeqId = -1;
         }
 
@@ -91,11 +95,28 @@ export default abstract class PathingEntity extends Entity {
         }
 
         this.pathLength = 0;
+        this.seqPathLength = 0;
         this.seqTrigger = 0;
         this.pathTileX[0] = x;
         this.pathTileZ[0] = z;
         this.x = this.pathTileX[0] * 128 + this.size * 64;
         this.z = this.pathTileZ[0] * 128 + this.size * 64;
+    }
+
+    resetPath(): void {
+        this.pathLength = 0;
+        this.seqPathLength = 0;
+    }
+
+    hit(type: number, damage: number): void {
+        for (let i: number = 0; i < 4; i++) {
+            if (this.damageCycle[i] <= Game.loopCycle) {
+                this.damage[i] = damage;
+                this.damageType[i] = type;
+                this.damageCycle[i] = Game.loopCycle + 70;
+                return;
+            }
+        }
     }
 
     step(running: boolean, direction: number): void {

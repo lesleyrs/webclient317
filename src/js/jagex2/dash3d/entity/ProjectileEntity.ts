@@ -89,9 +89,14 @@ export default class ProjectileEntity extends Entity {
         }
     }
 
-    draw(): Model | null {
+    getModel(): Model | null {
         const tmp: Model = this.spotanim.getModel();
-        const model: Model = Model.modelShareColored(tmp, true, !this.spotanim.disposeAlpha, false);
+        let frame: number = -1;
+        if (this.spotanim.seq && this.spotanim.seq.frames) {
+            frame = this.spotanim.seq.frames[this.seqFrame];
+        }
+
+        const model: Model = Model.modelShareColored(tmp, true, frame === -1, false);
 
         if (this.spotanim.seq && this.spotanim.seq.frames) {
             model.createLabelReferences();

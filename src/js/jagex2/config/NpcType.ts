@@ -4,6 +4,9 @@ import Packet from '../io/Packet';
 import LruCache from '../datastruct/LruCache';
 import Model from '../graphics/Model';
 import {TypedArray1d} from '../util/Arrays';
+import {Client} from '../../client';
+import VarbitType from './VarbitType';
+import {Game} from '../../game';
 
 export default class NpcType extends ConfigType {
     static count: number = 0;
@@ -12,6 +15,7 @@ export default class NpcType extends ConfigType {
     static offsets: Int32Array | null = null;
     static cachePos: number = 0;
     static modelCache: LruCache | null = new LruCache(30);
+    static game: Game;
 
     static unpack = (config: Jagfile): void => {
         this.dat = new Packet(config.read('npc.dat'));
@@ -68,7 +72,6 @@ export default class NpcType extends ConfigType {
     size: number = 1;
     models: Uint16Array | null = null;
     heads: Uint16Array | null = null;
-    disposeAlpha: boolean = false;
     readyanim: number = -1;
     walkanim: number = -1;
     walkanim_b: number = -1;
@@ -77,13 +80,20 @@ export default class NpcType extends ConfigType {
     recol_s: Uint16Array | null = null;
     recol_d: Uint16Array | null = null;
     op: (string | null)[] | null = null;
-    resizex: number = -1;
-    resizey: number = -1;
-    resizez: number = -1;
     minimap: boolean = true;
     vislevel: number = -1;
     resizeh: number = 128;
     resizev: number = 128;
+    interactable: boolean = true;
+    overrides: Uint32Array | null = null;
+    varpID: number = -1;
+    varbitID: number = -1;
+    turnSpeed: number = 32;
+    headicon: number = -1;
+    lightAttenuation: number = 0;
+    lightAmbient: number = 0;
+    important: boolean = false;
+    uid: bigint = -1n;
 
     decode(code: number, dat: Packet): void {
         if (code === 1) {
@@ -103,8 +113,6 @@ export default class NpcType extends ConfigType {
             this.readyanim = dat.g2;
         } else if (code === 14) {
             this.walkanim = dat.g2;
-        } else if (code === 16) {
-            this.disposeAlpha = true;
         } else if (code === 17) {
             this.walkanim = dat.g2;
             this.walkanim_b = dat.g2;
@@ -135,12 +143,8 @@ export default class NpcType extends ConfigType {
             for (let i: number = 0; i < count; i++) {
                 this.heads[i] = dat.g2;
             }
-        } else if (code === 90) {
-            this.resizex = dat.g2;
-        } else if (code === 91) {
-            this.resizey = dat.g2;
-        } else if (code === 92) {
-            this.resizez = dat.g2;
+        } else if (code === 90 || code === 91 || code === 92) {
+            dat.g2;
         } else if (code === 93) {
             this.minimap = false;
         } else if (code === 95) {
@@ -149,10 +153,53 @@ export default class NpcType extends ConfigType {
             this.resizeh = dat.g2;
         } else if (code === 98) {
             this.resizev = dat.g2;
+        } else if (code === 99) {
+            this.important = true;
+        } else if (code === 100) {
+            this.lightAmbient = dat.g1b;
+        } else if (code === 101) {
+            this.lightAttenuation = dat.g1b * 5;
+        } else if (code === 102) {
+            this.headicon = dat.g2;
+        } else if (code === 103) {
+            this.turnSpeed = dat.g2;
+        } else if (code === 106) {
+            this.varbitID = dat.g2;
+
+            if (this.varbitID === 65535) {
+                this.varbitID = -1;
+            }
+
+            this.varpID = dat.g2;
+
+            if (this.varpID === 65535) {
+                this.varpID = -1;
+            }
+
+            const overrideCount: number = dat.g1;
+            this.overrides = new Uint32Array(overrideCount + 1);
+            for (let i: number = 0; i <= overrideCount; i++) {
+                this.overrides[i] = dat.g2;
+
+                if (this.overrides[i] == 65535) {
+                    this.overrides[i] = -1;
+                }
+            }
+        } else if (code == 107) {
+            this.interactable = false;
         }
     }
 
     getSequencedModel(primaryTransformId: number, secondaryTransformId: number, seqMask: Int32Array | null): Model | null {
+        if (this.overrides) {
+            const override: NpcType | null = this.getOverrideType();
+            if (!override) {
+                return null;
+            } else {
+                return override.getSequencedModel(secondaryTransformId, primaryTransformId, seqMask);
+            }
+        }
+
         let tmp: Model | null = null;
         let model: Model | null = null;
         if (NpcType.modelCache) {
@@ -161,7 +208,8 @@ export default class NpcType extends ConfigType {
             if (!model && this.models) {
                 const models: (Model | null)[] = new TypedArray1d(this.models.length, null);
                 for (let i: number = 0; i < this.models.length; i++) {
-                    models[i] = Model.model(this.models[i]);
+                    const data: Uint8Array | Jagfile | null = Client.jagStore[1].read(this.models[i]);
+                    models[i] = Model.model(data as Uint8Array, this.models[i]);
                 }
 
                 if (models.length === 1) {
@@ -177,7 +225,7 @@ export default class NpcType extends ConfigType {
                 }
 
                 model?.createLabelReferences();
-                model?.calculateNormals(64, 850, -30, -50, -30, true);
+                model?.calculateNormals(64 + this.lightAmbient, 850 + this.lightAttenuation, -30, -50, -30, true);
                 if (model) {
                     NpcType.modelCache.put(BigInt(this.id), model);
                 }
@@ -185,7 +233,7 @@ export default class NpcType extends ConfigType {
         }
 
         if (model) {
-            tmp = Model.modelShareAlpha(model, !this.disposeAlpha);
+            tmp = Model.modelShareAlpha(model, primaryTransformId === -1 && secondaryTransformId === -1);
             if (primaryTransformId !== -1 && secondaryTransformId !== -1) {
                 tmp.applyTransforms(primaryTransformId, secondaryTransformId, seqMask);
             } else if (primaryTransformId !== -1) {
@@ -210,13 +258,25 @@ export default class NpcType extends ConfigType {
     }
 
     getHeadModel(): Model | null {
+        if (this.overrides) {
+            const type: NpcType | null = this.getOverrideType();
+            if (!type) {
+                return null;
+            } else {
+                return type.getHeadModel();
+            }
+        }
+
         if (!this.heads) {
             return null;
         }
 
+        // TODO: validate stuff
+
         const models: (Model | null)[] = new TypedArray1d(this.heads.length, null);
         for (let i: number = 0; i < this.heads.length; i++) {
-            models[i] = Model.model(this.heads[i]);
+            const data: Uint8Array | Jagfile | null = Client.jagStore[1].read(this.heads[i]);
+            models[i] = Model.model(data as Uint8Array, this.heads[i]);
         }
 
         let model: Model | null;
@@ -233,5 +293,26 @@ export default class NpcType extends ConfigType {
         }
 
         return model;
+    }
+
+    getOverrideType(): NpcType | null {
+        let value: number = -1;
+
+        if (this.varbitID !== -1) {
+            const vb: VarbitType = VarbitType.instances[this.varbitID];
+            const varp: number = vb.varp;
+            const lsb: number = vb.lsb;
+            const msb: number = vb.msb;
+            const mask: number = Client.BITMASK[msb - lsb];
+            value = (NpcType.game.varps[varp] >> lsb) & mask;
+        } else if (this.varpID !== -1) {
+            value = NpcType.game.varps[this.varpID];
+        }
+
+        if (!this.overrides || value < 0 || value >= this.overrides.length || this.overrides[value] === -1) {
+            return null;
+        } else {
+            return NpcType.get(this.overrides[value]);
+        }
     }
 }

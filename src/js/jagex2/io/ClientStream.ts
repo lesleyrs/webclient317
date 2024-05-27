@@ -57,8 +57,8 @@ export default class ClientStream {
         return this.closed ? 0 : this.wsin.available;
     }
 
-    write(src: Uint8Array, len: number): void {
-        this.wsout.write(src, len);
+    write(src: Uint8Array, off: number, len: number): void {
+        this.wsout.write(src, off, len);
     }
 
     async read(): Promise<number> {
@@ -119,7 +119,7 @@ class WebSocketWriter {
         this.limit = limit;
     }
 
-    write(src: Uint8Array, len: number): void {
+    write(src: Uint8Array, off: number, len: number): void {
         if (this.closed) {
             return;
         }
@@ -131,7 +131,7 @@ class WebSocketWriter {
             throw new Error('buffer overflow');
         }
         try {
-            this.socket.send(src.subarray(0, len));
+            this.socket.send(src.subarray(off, len));
         } catch (e) {
             this.ioerror = true;
         }

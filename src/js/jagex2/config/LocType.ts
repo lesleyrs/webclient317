@@ -6,8 +6,14 @@ import Model from '../graphics/Model';
 import LocShape from '../dash3d/LocShape';
 import LocAngle from '../dash3d/LocAngle';
 import {TypedArray1d} from '../util/Arrays';
+import {Client} from '../../client';
+import VarbitType from './VarbitType';
+import {Game} from '../../game';
 
 export default class LocType extends ConfigType {
+    static game: Game;
+    static TMP_MODELS: Model[] = new Array(4);
+    static lowMemory = false;
     static count: number = 0;
     static cache: (LocType | null)[] | null = null;
     static dat: Packet | null = null;
@@ -29,8 +35,8 @@ export default class LocType extends ConfigType {
             offset += idx.g2;
         }
 
-        this.cache = new TypedArray1d(10, null);
-        for (let id: number = 0; id < 10; id++) {
+        this.cache = new TypedArray1d(20, null);
+        for (let id: number = 0; id < 20; id++) {
             this.cache[id] = new LocType(-1);
         }
     };
@@ -40,7 +46,11 @@ export default class LocType extends ConfigType {
             throw new Error('LocType not loaded!!!');
         }
 
-        for (let i: number = 0; i < 10; i++) {
+        if (id >= this.count) {
+            id = 0;
+        }
+
+        for (let i: number = 0; i < 20; i++) {
             const type: LocType | null = this.cache[i];
             if (!type) {
                 continue;
@@ -50,23 +60,27 @@ export default class LocType extends ConfigType {
             }
         }
 
-        this.cachePos = (this.cachePos + 1) % 10;
+        this.cachePos = (this.cachePos + 1) % 20;
         const loc: LocType = this.cache[this.cachePos]!;
         this.dat.pos = this.offsets[id];
         loc.id = id;
         loc.reset();
         loc.decodeType(this.dat);
 
-        if (!loc.shapes) {
-            loc.shapes = new Int32Array(1);
-        }
-
-        if (loc.active2 === -1 && loc.shapes) {
-            loc.active = loc.shapes.length > 0 && loc.shapes[0] === LocShape.CENTREPIECE_STRAIGHT.id;
+        if (loc.active2 === -1) {
+            loc.active = loc.models !== null && (!loc.shapes || loc.shapes[0] === LocShape.CENTREPIECE_STRAIGHT.id);
 
             if (loc.op) {
                 loc.active = true;
             }
+        }
+
+        if (loc.breakroutefinding) {
+            loc.blockwalk = false;
+            loc.blockrange = false;
+        }
+        if (loc.raiseobject == -1) {
+            loc.raiseobject = loc.blockwalk ? 1 : 0;
         }
         return loc;
     };
@@ -97,7 +111,6 @@ export default class LocType extends ConfigType {
     sharelight: boolean = false;
     occlude: boolean = false;
     anim: number = -1;
-    disposeAlpha: boolean = false;
     wallwidth: number = 16;
     ambient: number = 0;
     contrast: number = 0;
@@ -114,21 +127,45 @@ export default class LocType extends ConfigType {
     offsety: number = 0;
     offsetz: number = 0;
     forcedecor: boolean = false;
+    breakroutefinding: boolean = false;
+    raiseobject: number = -1;
+    multivarbit: number = -1;
+    multivarp: number = -1;
+    multiloc: Int32Array | null = null;
 
     decode(code: number, dat: Packet): void {
         if (code === 1) {
             const count: number = dat.g1;
-            this.models = new Int32Array(count);
-            this.shapes = new Int32Array(count);
+            if (count > 0) {
+                if (this.models && !LocType.lowMemory) {
+                    dat.pos += count * 3;
+                } else {
+                    this.models = new Int32Array(count);
+                    this.shapes = new Int32Array(count);
 
-            for (let i: number = 0; i < count; i++) {
-                this.models[i] = dat.g2;
-                this.shapes[i] = dat.g1;
+                    for (let i: number = 0; i < count; i++) {
+                        this.models[i] = dat.g2;
+                        this.shapes[i] = dat.g1;
+                    }
+                }
             }
         } else if (code === 2) {
             this.name = dat.gjstr;
         } else if (code === 3) {
             this.desc = dat.gjstr;
+        } else if (code === 5) {
+            const modelCount: number = dat.g1;
+            if (modelCount > 0) {
+                if (this.models && !LocType.lowMemory) {
+                    dat.pos += modelCount * 2;
+                } else {
+                    this.shapes = null;
+                    this.models = new Int32Array(modelCount);
+                    for (let i: number = 0; i < modelCount; i++) {
+                        this.models[i] = dat.g2;
+                    }
+                }
+            }
         } else if (code === 14) {
             this.width = dat.g1;
         } else if (code === 15) {
@@ -154,8 +191,6 @@ export default class LocType extends ConfigType {
             if (this.anim === 65535) {
                 this.anim = -1;
             }
-        } else if (code === 25) {
-            this.disposeAlpha = true;
         } else if (code === 28) {
             this.wallwidth = dat.g1;
         } else if (code === 29) {
@@ -204,92 +239,202 @@ export default class LocType extends ConfigType {
             this.offsetz = dat.g2b;
         } else if (code === 73) {
             this.forcedecor = true;
+        } else if (code == 74) {
+            this.breakroutefinding = true;
+        } else if (code == 75) {
+            this.raiseobject = dat.g1;
+        } else if (code == 77) {
+            this.multivarbit = dat.g2;
+            if (this.multivarbit === 65535) {
+                this.multivarbit = -1;
+            }
+            this.multivarp = dat.g2;
+            if (this.multivarp === 65535) {
+                this.multivarp = -1;
+            }
+            const overrideCount: number = dat.g1;
+            this.multiloc = new Int32Array(overrideCount + 1);
+            for (let i: number = 0; i <= overrideCount; i++) {
+                this.multiloc[i] = dat.g2;
+                if (this.multiloc[i] === 65535) {
+                    this.multiloc[i] = -1;
+                }
+            }
+        }
+    }
+
+    getMultiloc(): LocType | null {
+        let value: number = -1;
+
+        if (this.multivarbit !== -1) {
+            const varbit: VarbitType = VarbitType.instances[this.multivarbit];
+            const varp: number = varbit.varp;
+            const low: number = varbit.lsb;
+            const high: number = varbit.msb;
+            const mask: number = Game.BITMASK[high - low];
+            value = (LocType.game.varps[varp] >> low) & mask;
+        } else if (this.multivarp !== -1) {
+            value = LocType.game.varps[this.multivarp];
+        }
+
+        if (this.multiloc) {
+            if (value < 0 || value >= this.multiloc.length || this.multiloc[value] === -1) {
+                return null;
+            } else {
+                return LocType.get(this.multiloc[value]);
+            }
+        } else {
+            return null;
         }
     }
 
     getModel(shape: number, angle: number, heightmapSW: number, heightmapSE: number, heightmapNE: number, heightmapNW: number, transformId: number): Model | null {
+        let model: Model | null = this.getModel2(shape, angle, transformId);
+
+        if (!model) {
+            // TODO:
+            // console.log('no model?', shape, angle);
+            return null;
+        }
+
+        if (this.hillskew || this.sharelight) {
+            model = Model.modelCopyFaces(model, this.hillskew, this.sharelight);
+        }
+
+        if (this.hillskew) {
+            const groundY: number = ((heightmapSW + heightmapSE + heightmapNE + heightmapNW) / 4) | 0;
+
+            for (let i: number = 0; i < model.vertexCount; i++) {
+                const x: number = model.vertexX[i];
+                const z: number = model.vertexZ[i];
+
+                const heightS: number = heightmapSW + ((((heightmapSE - heightmapSW) * (x + 64)) / 128) | 0);
+                const heightN: number = heightmapNW + ((((heightmapNE - heightmapNW) * (x + 64)) / 128) | 0);
+                const y: number = heightS + ((((heightN - heightS) * (z + 64)) / 128) | 0);
+
+                model.vertexY[i] += y - groundY;
+            }
+
+            model.calculateBoundsY();
+        }
+
+        return model;
+    }
+
+    getModel2(shape: number, angle: number, transformId: number): Model | null {
+        let model: Model | null = null;
+        let bitset: bigint;
+
         if (!this.shapes) {
-            return null;
-        }
-
-        let shapeIndex: number = -1;
-        for (let i: number = 0; i < this.shapes.length; i++) {
-            if (this.shapes[i] === shape) {
-                shapeIndex = i;
-                break;
+            if (shape != 10) {
+                return null;
             }
-        }
 
-        if (shapeIndex === -1) {
-            return null;
-        }
+            bitset = BigInt(BigInt(this.id) << 6n) + BigInt(angle) + BigInt((BigInt(transformId) + 1n) << 32n);
 
-        const bitset: bigint = BigInt(BigInt(this.id) << 6n) + BigInt(BigInt(shapeIndex) << 3n) + BigInt(angle) + BigInt((BigInt(transformId) + 1n) << 32n);
-        /*if (reset) {
-            bitset = 0L;
-        }*/
-
-        let cached: Model | null = LocType.modelCacheDynamic?.get(bitset) as Model | null;
-        if (cached) {
-            /*if (reset) {
+            const cached: Model | null = LocType.modelCacheDynamic?.get(bitset) as Model | null;
+            if (cached) {
                 return cached;
-            }*/
-
-            if (this.hillskew || this.sharelight) {
-                cached = Model.modelCopyFaces(cached, this.hillskew, this.sharelight);
             }
 
-            if (this.hillskew) {
-                const groundY: number = ((heightmapSW + heightmapSE + heightmapNE + heightmapNW) / 4) | 0;
+            if (!this.models) {
+                return null;
+            }
 
-                for (let i: number = 0; i < cached.vertexCount; i++) {
-                    const x: number = cached.vertexX[i];
-                    const z: number = cached.vertexZ[i];
+            const flipped: boolean = this.mirror !== angle > 3;
+            const modelCount: number = this.models.length;
 
-                    const heightS: number = heightmapSW + ((((heightmapSE - heightmapSW) * (x + 64)) / 128) | 0);
-                    const heightN: number = heightmapNW + ((((heightmapNE - heightmapNW) * (x + 64)) / 128) | 0);
-                    const y: number = heightS + ((((heightN - heightS) * (z + 64)) / 128) | 0);
+            for (let i: number = 0; i < modelCount; i++) {
+                let modelId: number = this.models[i];
 
-                    cached.vertexY[i] += y - groundY;
+                if (flipped) {
+                    modelId += 65536;
                 }
 
-                cached.calculateBoundsY();
+                model = LocType.modelCacheStatic?.get(BigInt(modelId)) as Model | null;
+                if (!model) {
+                    const data: Uint8Array | Jagfile | null = Client.jagStore[1].read(modelId & 0xffff);
+                    // TODO: tryGet
+                    model = Model.model(data as Uint8Array, modelId & 0xffff);
+
+                    if (!model) {
+                        return null;
+                    }
+
+                    if (flipped) {
+                        model.rotateY180();
+                    }
+                    LocType.modelCacheStatic?.put(BigInt(modelId), model);
+                }
+
+                if (modelCount > 1) {
+                    LocType.TMP_MODELS[i] = model;
+                }
             }
 
-            return cached;
-        }
+            if (modelCount > 1) {
+                model = Model.modelFromModels(LocType.TMP_MODELS, modelCount);
+            }
+        } else {
+            let shapeIndex: number = -1;
+            if (this.shapes) {
+                for (let i: number = 0; i < this.shapes.length; i++) {
+                    if (this.shapes[i] === shape) {
+                        shapeIndex = i;
+                        break;
+                    }
+                }
+            }
 
-        if (!this.models) {
-            return null;
-        }
+            if (shapeIndex === -1) {
+                return null;
+            }
 
-        if (shapeIndex >= this.models.length) {
-            return null;
-        }
+            bitset = BigInt(BigInt(this.id) << 6n) + BigInt(BigInt(shapeIndex) << 3n) + BigInt(angle) + BigInt((BigInt(transformId) + 1n) << 32n);
 
-        let modelId: number = this.models[shapeIndex];
-        if (modelId === -1) {
-            return null;
-        }
+            const cached: Model | null = LocType.modelCacheDynamic?.get(bitset) as Model | null;
+            if (cached) {
+                return cached;
+            }
 
-        const flipped: boolean = this.mirror !== angle > 3;
-        if (flipped) {
-            modelId += 65536;
-        }
+            if (!this.models) {
+                return null;
+            }
 
-        let model: Model | null = LocType.modelCacheStatic?.get(BigInt(modelId)) as Model | null;
-        if (!model) {
-            model = Model.model(modelId & 0xffff);
+            let modelId: number = this.models[shapeIndex];
+            const flipped: boolean = this.mirror !== angle > 3;
+
             if (flipped) {
-                model.rotateY180();
+                modelId += 65536;
             }
-            LocType.modelCacheStatic?.put(BigInt(modelId), model);
+
+            model = LocType.modelCacheStatic?.get(BigInt(modelId)) as Model | null;
+
+            if (!model) {
+                const data: Uint8Array | Jagfile | null = Client.jagStore[1].read(modelId & 0xffff);
+                // TODO: tryGet
+                model = Model.model(data as Uint8Array, modelId & 0xffff);
+
+                if (!model) {
+                    return null;
+                }
+
+                if (flipped) {
+                    model.rotateY180();
+                }
+
+                LocType.modelCacheStatic?.put(BigInt(modelId), model);
+            }
+        }
+
+        if (!model) {
+            return null;
         }
 
         const scaled: boolean = this.resizex !== 128 || this.resizey !== 128 || this.resizez !== 128;
         const translated: boolean = this.offsetx !== 0 || this.offsety !== 0 || this.offsetz !== 0;
 
-        let modified: Model = Model.modelShareColored(model, !this.recol_s, !this.disposeAlpha, angle === LocAngle.WEST && transformId === -1 && !scaled && !translated);
+        const modified: Model = Model.modelShareColored(model, !this.recol_s, transformId === -1, angle === LocAngle.WEST && transformId === -1 && !scaled && !translated);
         if (transformId !== -1) {
             modified.createLabelReferences();
             modified.applyTransform(transformId);
@@ -317,33 +462,11 @@ export default class LocType extends ConfigType {
 
         modified.calculateNormals((this.ambient & 0xff) + 64, (this.contrast & 0xff) * 5 + 768, -50, -10, -50, !this.sharelight);
 
-        if (this.blockwalk) {
-            modified.objRaise = modified.maxY;
+        if (this.raiseobject) {
+            modified.objRaise = modified.minY;
         }
 
         LocType.modelCacheDynamic?.put(bitset, modified);
-
-        if (this.hillskew || this.sharelight) {
-            modified = Model.modelCopyFaces(modified, this.hillskew, this.sharelight);
-        }
-
-        if (this.hillskew) {
-            const groundY: number = ((heightmapSW + heightmapSE + heightmapNE + heightmapNW) / 4) | 0;
-
-            for (let i: number = 0; i < modified.vertexCount; i++) {
-                const x: number = modified.vertexX[i];
-                const z: number = modified.vertexZ[i];
-
-                const heightS: number = heightmapSW + ((((heightmapSE - heightmapSW) * (x + 64)) / 128) | 0);
-                const heightN: number = heightmapNW + ((((heightmapNE - heightmapNW) * (x + 64)) / 128) | 0);
-                const y: number = heightS + ((((heightN - heightS) * (z + 64)) / 128) | 0);
-
-                modified.vertexY[i] += y - groundY;
-            }
-
-            modified.calculateBoundsY();
-        }
-
         return modified;
     }
 
@@ -368,7 +491,6 @@ export default class LocType extends ConfigType {
         this.ambient = 0;
         this.contrast = 0;
         this.op = null;
-        this.disposeAlpha = false;
         this.mapfunction = -1;
         this.mapscene = -1;
         this.mirror = false;
@@ -381,5 +503,10 @@ export default class LocType extends ConfigType {
         this.offsety = 0;
         this.offsetz = 0;
         this.forcedecor = false;
+        this.breakroutefinding = false;
+        this.raiseobject = -1;
+        this.multivarbit = -1;
+        this.multivarp = -1;
+        this.multiloc = null;
     }
 }

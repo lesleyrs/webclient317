@@ -9,11 +9,13 @@ export default class LocTemporary extends Linkable {
     locIndex: number;
     angle: number;
     shape: number;
-    readonly lastLocIndex: number;
-    readonly lastAngle: number;
-    readonly lastShape: number;
+    lastLocIndex: number;
+    lastAngle: number;
+    lastShape: number;
+    delay: number = 0;
+    duration: number = -1;
 
-    constructor(plane: number, layer: number, x: number, z: number, locIndex: number, angle: number, shape: number, lastLocIndex: number, lastAngle: number, lastShape: number) {
+    constructor(plane: number, layer: number, x: number, z: number, locIndex: number, angle: number, shape: number, lastLocIndex: number, lastAngle: number, lastShape: number, delay?: number, duration?: number) {
         super();
         this.plane = plane;
         this.layer = layer;
@@ -25,5 +27,11 @@ export default class LocTemporary extends Linkable {
         this.lastLocIndex = lastLocIndex;
         this.lastAngle = lastAngle;
         this.lastShape = lastShape;
+        if (delay) {
+            this.delay = delay;
+        }
+        if (duration) {
+            this.duration = duration;
+        }
     }
 }

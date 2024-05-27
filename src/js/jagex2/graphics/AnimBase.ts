@@ -1,47 +1,31 @@
-import Jagfile from '../io/Jagfile';
 import Packet from '../io/Packet';
-import {TypedArray1d} from '../util/Arrays';
 
 export default class AnimBase {
-    static instances: AnimBase[] = [];
+    static readonly OP_BASE: number = 0;
+    static readonly OP_TRANSLATE: number = 1;
+    static readonly OP_ROTATE: number = 2;
+    static readonly OP_SCALE: number = 3;
+    static readonly OP_ALPHA: number = 5;
 
-    static unpack = (models: Jagfile): void => {
-        const head: Packet = new Packet(models.read('base_head.dat'));
-        const type: Packet = new Packet(models.read('base_type.dat'));
-        const label: Packet = new Packet(models.read('base_label.dat'));
+    public readonly types: Int32Array | null = null;
+    public readonly labels: Int32Array[] | null = null;
 
-        const total: number = head.g2;
-        head.pos += 2; // const count = head.g2;
+    constructor(dat: Packet) {
+        const length: number = dat.g1;
+        this.types = new Int32Array(length);
+        this.labels = new Array(length);
 
-        for (let i: number = 0; i < total; i++) {
-            const id: number = head.g2;
-            const length: number = head.g1;
-
-            const transformTypes: Uint8Array = new Uint8Array(length);
-            const groupLabels: (Uint8Array | null)[] = new TypedArray1d(length, null);
-
-            for (let j: number = 0; j < length; j++) {
-                transformTypes[j] = type.g1;
-
-                const groupCount: number = label.g1;
-                const labels: Uint8Array = new Uint8Array(groupCount);
-
-                for (let k: number = 0; k < groupCount; k++) {
-                    labels[k] = label.g1;
-                }
-                groupLabels[j] = labels;
-            }
-
-            this.instances[id] = new AnimBase();
-            this.instances[id].length = length;
-            this.instances[id].types = transformTypes;
-            this.instances[id].labels = groupLabels;
+        for (let i: number = 0; i < length; i++) {
+            this.types[i] = dat.g1;
         }
-    };
 
-    // ----
+        for (let i: number = 0; i < length; i++) {
+            const labelCount: number = dat.g1;
+            this.labels[i] = new Int32Array(labelCount);
 
-    length: number = 0;
-    types: Uint8Array | null = null;
-    labels: (Uint8Array | null)[] | null = null;
+            for (let j: number = 0; j < labelCount; j++) {
+                this.labels[i][j] = dat.g1;
+            }
+        }
+    }
 }

@@ -8,6 +8,7 @@ import Draw3D from '../graphics/Draw3D';
 import Draw2D from '../graphics/Draw2D';
 import Colors from '../graphics/Colors';
 import {TypedArray1d} from '../util/Arrays';
+import {Client} from '../../client';
 
 export default class ObjType extends ConfigType {
     static count: number = 0;
@@ -15,12 +16,10 @@ export default class ObjType extends ConfigType {
     static dat: Packet | null = null;
     static offsets: Int32Array | null = null;
     static cachePos: number = 0;
-    static membersWorld: boolean = true;
     static modelCache: LruCache | null = new LruCache(50);
     static iconCache: LruCache | null = new LruCache(200);
 
-    static unpack = (config: Jagfile, members: boolean): void => {
-        this.membersWorld = members;
+    static unpack = (config: Jagfile): void => {
         this.dat = new Packet(config.read('obj.dat'));
         const idx: Packet = new Packet(config.read('obj.idx'));
 
@@ -65,11 +64,12 @@ export default class ObjType extends ConfigType {
             obj.toCertificate();
         }
 
-        if (!this.membersWorld && obj.members) {
+        if (!Client.members && obj.members) {
             obj.name = 'Members Object';
             obj.desc = "Login to a members' server to use this object.";
             obj.op = null;
             obj.iop = null;
+            obj.team = 0;
         }
 
         return obj;
@@ -83,8 +83,8 @@ export default class ObjType extends ConfigType {
         this.dat = null;
     };
 
-    static getIcon = (id: number, count: number): Pix24 => {
-        if (ObjType.iconCache) {
+    static getIcon = (id: number, count: number, outlineColor: number): Pix24 => {
+        if (outlineColor == 0 && ObjType.iconCache) {
             let icon: Pix24 | null = ObjType.iconCache.get(BigInt(id)) as Pix24 | null;
             if (icon && icon.cropH !== count && icon.cropH !== -1) {
                 icon.unlink();
@@ -132,10 +132,10 @@ export default class ObjType extends ConfigType {
         Draw2D.fillRect(0, 0, 32, 32, Colors.BLACK);
         Draw3D.init2D();
 
-        const iModel: Model = obj.getInterfaceModel(1);
+        const iModel: Model = obj.getModel(1);
         const sinPitch: number = (Draw3D.sin[obj.xan2d] * obj.zoom2d) >> 16;
         const cosPitch: number = (Draw3D.cos[obj.xan2d] * obj.zoom2d) >> 16;
-        iModel.drawSimple(0, obj.yan2d, obj.zan2d, obj.xan2d, obj.xof2d, sinPitch + ((iModel.maxY / 2) | 0) + obj.yof2d, cosPitch + obj.yof2d);
+        iModel.drawSimple(0, obj.yan2d, obj.zan2d, obj.xan2d, obj.xof2d, sinPitch + ((iModel.minY / 2) | 0) + obj.yof2d, cosPitch + obj.yof2d);
 
         // draw outline
         for (let x: number = 31; x >= 0; x--) {
@@ -156,27 +156,49 @@ export default class ObjType extends ConfigType {
             }
         }
 
-        // draw shadow
-        for (let x: number = 31; x >= 0; x--) {
-            for (let y: number = 31; y >= 0; y--) {
-                if (icon.pixels[x + y * 32] === 0 && x > 0 && y > 0 && icon.pixels[x + (y - 1) * 32 - 1] > 0) {
-                    icon.pixels[x + y * 32] = 3153952;
+        // draw color outline
+        if (outlineColor > 0) {
+            for (let x: number = 31; x >= 0; x--) {
+                for (let y: number = 31; y >= 0; y--) {
+                    if (icon.pixels[x + y * 32] === 0) {
+                        if (x > 0 && icon.pixels[x + y * 32 - 1] === 1) {
+                            icon.pixels[x + y * 32] = outlineColor;
+                        } else if (y > 0 && icon.pixels[x + (y - 1) * 32] === 1) {
+                            icon.pixels[x + y * 32] = outlineColor;
+                        } else if (x < 31 && icon.pixels[x + y * 32 + 1] === 1) {
+                            icon.pixels[x + y * 32] = outlineColor;
+                        } else if (y < 31 && icon.pixels[x + (y + 1) * 32] === 1) {
+                            icon.pixels[x + y * 32] = outlineColor;
+                        }
+                    }
+                }
+            }
+        } else if (outlineColor === 0) {
+            // draw shadow
+            for (let x: number = 31; x >= 0; x--) {
+                for (let y: number = 31; y >= 0; y--) {
+                    if (icon.pixels[x + y * 32] === 0 && x > 0 && y > 0 && icon.pixels[x + (y - 1) * 32 - 1] > 0) {
+                        icon.pixels[x + y * 32] = 3153952;
+                    }
                 }
             }
         }
 
         if (obj.certtemplate !== -1) {
-            const linkedIcon: Pix24 = this.getIcon(obj.certlink, 10);
+            const linkedIcon: Pix24 = this.getIcon(obj.certlink, 10, -1);
             const w: number = linkedIcon.cropW;
             const h: number = linkedIcon.cropH;
             linkedIcon.cropW = 32;
             linkedIcon.cropH = 32;
-            linkedIcon.crop(5, 5, 22, 22);
+            linkedIcon.draw(0, 0);
             linkedIcon.cropW = w;
             linkedIcon.cropH = h;
         }
 
-        ObjType.iconCache?.put(BigInt(id), icon);
+        if (outlineColor == 0) {
+            ObjType.iconCache?.put(BigInt(id), icon);
+        }
+
         Draw2D.bind(_data, _w, _h);
         Draw2D.setBounds(_l, _t, _r, _b);
         Draw3D.centerX = _cx;
@@ -205,8 +227,6 @@ export default class ObjType extends ConfigType {
     zan2d: number = 0;
     xof2d: number = 0;
     yof2d: number = 0;
-    code9: boolean = false;
-    code10: number = -1;
     stackable: boolean = false;
     cost: number = 1;
     members: boolean = false;
@@ -228,6 +248,12 @@ export default class ObjType extends ConfigType {
     countco: Uint16Array | null = null;
     certlink: number = -1;
     certtemplate: number = -1;
+    scaleX: number = 128;
+    scaleZ: number = 128;
+    scaleY: number = 128;
+    lightAmbient: number = 0;
+    lightAttenuation: number = 0;
+    team: number = 0;
 
     decode(code: number, dat: Packet): void {
         if (code === 1) {
@@ -244,18 +270,10 @@ export default class ObjType extends ConfigType {
             this.yan2d = dat.g2;
         } else if (code === 7) {
             this.xof2d = dat.g2b;
-            if (this.xof2d > 32767) {
-                this.xof2d -= 65536;
-            }
         } else if (code === 8) {
             this.yof2d = dat.g2b;
-            if (this.yof2d > 32767) {
-                this.yof2d -= 65536;
-            }
-        } else if (code === 9) {
-            this.code9 = true;
         } else if (code === 10) {
-            this.code10 = dat.g2;
+            dat.g2;
         } else if (code === 11) {
             this.stackable = true;
         } else if (code === 12) {
@@ -321,35 +339,48 @@ export default class ObjType extends ConfigType {
 
             this.countobj[code - 100] = dat.g2;
             this.countco[code - 100] = dat.g2;
+        } else if (code === 110) {
+            this.scaleX = dat.g2;
+        } else if (code === 111) {
+            this.scaleZ = dat.g2;
+        } else if (code === 112) {
+            this.scaleY = dat.g2;
+        } else if (code === 113) {
+            this.lightAmbient = dat.g1b;
+        } else if (code === 114) {
+            this.lightAttenuation = dat.g1b * 5;
+        } else if (code === 115) {
+            this.team = dat.g1;
         }
     }
 
     getWornModel(gender: number): Model | null {
         let id1: number = this.manwear;
+        let id2: number = this.manwear2;
+        let id3: number = this.manwear3;
+
         if (gender === 1) {
             id1 = this.womanwear;
+            id2 = this.womanwear2;
+            id3 = this.womanwear3;
         }
 
         if (id1 === -1) {
             return null;
         }
 
-        let id2: number = this.manwear2;
-        let id3: number = this.manwear3;
-        if (gender === 1) {
-            id2 = this.womanwear2;
-            id3 = this.womanwear3;
-        }
-
-        let model: Model = Model.model(id1);
+        const data: Uint8Array | Jagfile | null = Client.jagStore[1].read(id1);
+        let model: Model = Model.model(data as Uint8Array, id1);
         if (id2 !== -1) {
-            const model2: Model = Model.model(id2);
+            const data: Uint8Array | Jagfile | null = Client.jagStore[1].read(id2);
+            const model2: Model = Model.model(data as Uint8Array, id2);
 
             if (id3 === -1) {
                 const models: Model[] = [model, model2];
                 model = Model.modelFromModels(models, 2);
             } else {
-                const model3: Model = Model.model(id3);
+                const data: Uint8Array | Jagfile | null = Client.jagStore[1].read(id3);
+                const model3: Model = Model.model(data as Uint8Array, id3);
                 const models: Model[] = [model, model2, model3];
                 model = Model.modelFromModels(models, 3);
             }
@@ -386,9 +417,11 @@ export default class ObjType extends ConfigType {
             head2 = this.womanhead2;
         }
 
-        let model: Model = Model.model(head1);
+        const data: Uint8Array | Jagfile | null = Client.jagStore[1].read(head1);
+        let model: Model = Model.model(data as Uint8Array, head1);
         if (head2 !== -1) {
-            const model2: Model = Model.model(head2);
+            const data: Uint8Array | Jagfile | null = Client.jagStore[1].read(head2);
+            const model2: Model = Model.model(data as Uint8Array, head2);
             const models: Model[] = [model, model2];
             model = Model.modelFromModels(models, 2);
         }
@@ -398,6 +431,47 @@ export default class ObjType extends ConfigType {
                 model.recolor(this.recol_s[i], this.recol_d[i]);
             }
         }
+        return model;
+    }
+
+    getModel(count: number): Model {
+        if (this.countobj && this.countco && count > 1) {
+            let id: number = -1;
+            for (let i: number = 0; i < 10; i++) {
+                if (count >= this.countco[i] && this.countco[i] !== 0) {
+                    id = this.countobj[i];
+                }
+            }
+
+            if (id !== -1) {
+                return ObjType.get(id).getModel(1);
+            }
+        }
+
+        if (ObjType.modelCache) {
+            const model: Model | null = ObjType.modelCache.get(BigInt(this.id)) as Model | null;
+            if (model) {
+                return model;
+            }
+        }
+
+        const data: Uint8Array | Jagfile | null = Client.jagStore[1].read(this.model);
+
+        const model: Model = Model.model(data as Uint8Array, this.model);
+
+        if (this.scaleX !== 128 || this.scaleZ !== 128 || this.scaleY !== 128) {
+            model.scale(this.scaleX, this.scaleY, this.scaleZ);
+        }
+
+        if (this.recol_s && this.recol_d) {
+            for (let i: number = 0; i < this.recol_s.length; i++) {
+                model.recolor(this.recol_s[i], this.recol_d[i]);
+            }
+        }
+
+        model.calculateNormals(64 + this.lightAmbient, 768 + this.lightAttenuation, -50, -10, -50, true);
+        model.pickable = true;
+        ObjType.modelCache?.put(BigInt(this.id), model);
         return model;
     }
 
@@ -422,14 +496,17 @@ export default class ObjType extends ConfigType {
             }
         }
 
-        const model: Model = Model.model(this.model);
+        const data: Uint8Array | Jagfile | null = Client.jagStore[1].read(this.model);
+
+        const model: Model = Model.model(data as Uint8Array, this.model);
+
         if (this.recol_s && this.recol_d) {
             for (let i: number = 0; i < this.recol_s.length; i++) {
                 model.recolor(this.recol_s[i], this.recol_d[i]);
             }
         }
 
-        model.calculateNormals(64, 768, -50, -10, -50, true);
+        model.calculateNormals(64, 850, -30, -50, -30, true);
         model.pickable = true;
         ObjType.modelCache?.put(BigInt(this.id), model);
         return model;
@@ -474,8 +551,6 @@ export default class ObjType extends ConfigType {
         this.zan2d = 0;
         this.xof2d = 0;
         this.yof2d = 0;
-        this.code9 = false;
-        this.code10 = -1;
         this.stackable = false;
         this.cost = 1;
         this.members = false;
@@ -497,5 +572,11 @@ export default class ObjType extends ConfigType {
         this.countco = null;
         this.certlink = -1;
         this.certtemplate = -1;
+        this.scaleX = 128;
+        this.scaleZ = 128;
+        this.scaleY = 128;
+        this.lightAmbient = 0;
+        this.lightAttenuation = 0;
+        this.team = 0;
     }
 }
